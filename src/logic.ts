@@ -9,7 +9,7 @@ export type Bounds = { north: number; south: number; east: number; west: number 
 export type View = { center: LatLng; radius: number; bounds: Bounds }
 
 // Cat: 문자열 유니온 타입 = Java enum (이 8개 값만 허용)
-export type Cat = 'restaurant' | 'cafe' | 'bar' | 'bakery' | 'shopping' | 'sight' | 'lodging' | 'airport'
+export type Cat = 'restaurant' | 'cafe' | 'bar' | 'bakery' | 'shopping' | 'supermarket' | 'sight' | 'lodging' | 'airport'
 /**
  * `types`는 Google Places(New) 장소 유형; `food` 카테고리는 평점순 정렬 + 일본에서는 타베로그 링크 제공.
  * `hidden` 카테고리는 지도에 칩이 없음: 숙소는 전용 탭에서, 공항은 이름 검색으로 추가.
@@ -22,10 +22,12 @@ export const CATS: { id: Cat; label: string; find: string; types: string[]; food
   { id: 'cafe', label: '카페', find: '카페', types: ['cafe', 'coffee_shop'], food: true },
   // 술집 카테고리 정의
   { id: 'bar', label: '술집', find: '술집', types: ['bar', 'pub'], food: true },
-  // 빵집 카테고리 정의
-  { id: 'bakery', label: '빵집', find: '빵집', types: ['bakery'], food: true },
-  // 쇼핑 카테고리 정의 (food=false)
-  { id: 'shopping', label: '쇼핑', find: '쇼핑', types: ['shopping_mall', 'department_store', 'market'], food: false },
+  // 빵집 카테고리 정의 (빵·페이스트리 계열 매장까지 함께 조회)
+  { id: 'bakery', label: '빵집', find: '빵집', types: ['bakery', 'bagel_shop', 'donut_shop', 'pastry_shop', 'cake_shop', 'confectionery'], food: true },
+  // 쇼핑 카테고리 정의: 백화점·몰만이 아니라 옷·신발·전자제품 같은 개별 상점도 포함 (food=false)
+  { id: 'shopping', label: '쇼핑', find: '쇼핑', types: ['department_store', 'shopping_mall', 'market', 'clothing_store', 'shoe_store', 'sportswear_store', 'sporting_goods_store', 'electronics_store', 'book_store', 'cosmetics_store', 'gift_shop', 'toy_store', 'home_goods_store', 'furniture_store', 'jewelry_store', 'discount_store', 'store'], food: false },
+  // 마트 카테고리 정의 (슈퍼마켓·편의점, food=false)
+  { id: 'supermarket', label: '마트', find: '마트', types: ['supermarket', 'grocery_store', 'discount_supermarket', 'hypermarket', 'convenience_store'], food: false },
   // 관광 카테고리 정의
   { id: 'sight', label: '관광', find: '관광지', types: ['tourist_attraction'], food: false },
   // 숙소 카테고리 정의 (hidden: 지도 칩 숨김)
@@ -227,13 +229,23 @@ export function sortResults(list: PlaceInfo[], cat: Cat): PlaceInfo[] {
 export const ratingLabel = (p: PlaceInfo) =>
   // == null 은 null/undefined 모두 검사, 삼항연산자 사용, toLocaleString = 천단위 콤마
   p.rating == null ? '평점 없음' : `Google ★ ${p.rating.toFixed(1)} · 평가 ${(p.ratingCount ?? 0).toLocaleString('ko-KR')}개`
-/** 일본 음식점 전용: 검증된 페이지가 있으면 그것, 없으면 이름 + 지역으로 타베로그 검색. */
+/** 장소의 일본어 이름·지역. 구글 상세에서 확인했을 때만 채워진다. */
+export type NativeName = { name?: string; area?: string }
+/**
+ * 일본 음식점 전용: 검증된 페이지가 있으면 그것, 없으면 매장명 + 지역으로 타베로그 검색.
+ * 타베로그 검색은 `vs=1` + 지역(`sa`) + 검색어(`sk`)가 모두 있어야 매장 단위로 걸러지고,
+ * 이름·지역이 일본어여야 매장이 나온다 (한국어·로마자 이름은 0건이 되거나 전체 목록이 열린다).
+ */
 // tabelogLink: 일본 음식점일 때만 타베로그 링크 반환 (String|null)
-export function tabelogLink(p: PlaceInfo): string | null {
+export function tabelogLink(p: PlaceInfo, native?: NativeName): string | null {
   // 일본이 아니거나 음식 카테고리가 아니면 null
   if (p.country !== 'JP' || !catOf(p.cat)?.food) return null
-  // 검증된 URL이 있으면 사용, 없으면 이름+지역으로 검색 URL 생성
-  return p.tabelogUrl ?? `https://tabelog.com/rstLst/?sk=${encodeURIComponent(p.name)}&sa=${encodeURIComponent(p.area ?? '')}`
+  // 검증된 매장 URL이 있으면 그걸 우선 사용
+  if (p.tabelogUrl) return p.tabelogUrl
+  // 일본어 값이 있으면 그걸로, 없으면 가진 이름·지역으로 검색
+  const name = native?.name ?? p.name
+  const area = native?.area ?? p.area ?? ''
+  return `https://tabelog.com/rstLst/?vs=1&sa=${encodeURIComponent(area)}&sk=${encodeURIComponent(name)}`
 }
 /** 장소 하나의 Google Maps 페이지: 이름 + place ID. */
 // placeUrl: 구글 지도 장소 페이지 URL 생성
@@ -249,8 +261,8 @@ export function catOfTypes(types: string[]): Cat | undefined {
   const has = (re: RegExp) => types.some(t => re.test(t))
   // 공항
   if (has(/airport/)) return 'airport'
-  // 빵집
-  if (has(/bakery/)) return 'bakery'
+  // 빵집 (베이커리·베이글·도넛·페이스트리·케이크·제과점)
+  if (has(/bakery|bagel_shop|donut_shop|pastry_shop|cake_shop|confectionery/)) return 'bakery'
   // 카페
   if (has(/^(cafe|coffee_shop|tea_house)$/)) return 'cafe'
   // 술집
@@ -261,6 +273,8 @@ export function catOfTypes(types: string[]): Cat | undefined {
   if (has(/lodging|hotel|hostel|ryokan|guest_house/)) return 'lodging'
   // 관광지
   if (has(/tourist_attraction|museum|park|shrine|temple|castle|landmark/)) return 'sight'
+  // 마트 (슈퍼마켓·편의점). /store/ 보다 먼저 검사해야 쇼핑으로 새지 않는다
+  if (has(/supermarket|grocery_store|convenience_store|food_store/)) return 'supermarket'
   // 쇼핑 (어디에도 안 맞으면 값 없이 종료 = undefined)
   if (has(/store|shopping|market/)) return 'shopping'
 }

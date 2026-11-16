@@ -6,7 +6,7 @@ import {
   type AppState, type Cat, type Collection, type Flight, type Item, type PlaceInfo, type PlaceRef, type Stay, type Trip,
 } from './logic'
 // import: 장소 캐시 모듈의 조회 함수와 Entry 타입
-import { infoOf, retry, type Entry } from './places'
+import { infoOf, nativeOf, retry, type Entry } from './places'
 // import: 일정을 PNG 이미지로 그려주는 함수
 import { renderTripImage } from './exportImage'
 // import: 아이콘 상수와 Icon 컴포넌트(=재사용 뷰 조각)
@@ -249,7 +249,8 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
   // 표시할 이름 계산
   const name = placeName(e, ref?.alias)
   // 타베로그 링크 (p가 있을 때만 계산, && 단축 평가)
-  const tabelog = p && tabelogLink(p)
+  // 일본어 매장명을 이미 확인했으면 그걸로 검색한다 (없으면 가진 값으로)
+  const tabelog = p && tabelogLink(p, nativeOf(id))
 
   // add: 폼 제출 핸들러 (람다)
   const add = (ev: FormEvent) => {
@@ -791,7 +792,7 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
                 {/* Google 지도 링크 */}
                 <a className="link" href={placeUrl(p)} target="_blank" rel="noreferrer">Google 지도에서 보기</a>
                 {/* 타베로그 링크 (! 는 null 아님을 단언, Java엔 없는 TS 문법) */}
-                {tabelogLink(p) && <a className="link" href={tabelogLink(p)!} target="_blank" rel="noreferrer">타베로그에서 확인</a>}
+                {tabelogLink(p, nativeOf(p.id)) && <a className="link" href={tabelogLink(p, nativeOf(p.id))!} target="_blank" rel="noreferrer">타베로그에서 확인</a>}
               </span>
             )}
             {/* 로딩 실패 시 에러와 재시도 버튼 */}

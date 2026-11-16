@@ -96,7 +96,10 @@ test('타베로그 링크는 일본의 음식 카테고리에만, 확인된 URL 
   // 일본이어도 음식 카테고리 아니면 null
   assert.equal(tabelogLink(info({ cat: 'sight', country: 'JP' })), null)
   // 일본 음식점은 이름+지역으로 검색 URL
-  assert.equal(tabelogLink(info({ cat: 'bar', country: 'JP', name: 'A B', area: '大阪' })), 'https://tabelog.com/rstLst/?sk=A%20B&sa=%E5%A4%A7%E9%98%AA')
+  // vs=1 이 없으면 타베로그가 검색어를 무시하고 전국 목록을 보여준다
+  assert.equal(tabelogLink(info({ cat: 'bar', country: 'JP', name: 'A B', area: '大阪' })), 'https://tabelog.com/rstLst/?vs=1&sa=%E5%A4%A7%E9%98%AA&sk=A%20B')
+  // 일본어 이름을 알면 그걸로 검색한다
+  assert.equal(tabelogLink(info({ cat: 'bar', country: 'JP', name: '카니도라쿠', area: 'Osaka' }), { name: 'かに道楽 本店', area: '大阪' }), 'https://tabelog.com/rstLst/?vs=1&sa=%E5%A4%A7%E9%98%AA&sk=%E3%81%8B%E3%81%AB%E9%81%93%E6%A5%BD%20%E6%9C%AC%E5%BA%97')
   // 확인된 URL이 있으면 그걸 우선 사용
   assert.equal(tabelogLink(info({ cat: 'bakery', country: 'JP', tabelogUrl: 'https://tabelog.com/x/' })), 'https://tabelog.com/x/')
 })

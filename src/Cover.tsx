@@ -105,6 +105,7 @@ export const CAT_ICON: Record<string, string> = {
   bar: 'M5 4h14l-7 8zM12 12v8M8 20h8',
   bakery: 'M4 14a4 4 0 0 1 4-6h8a4 4 0 0 1 4 6v4H4zM9 8v4M15 8v4',
   shopping: 'M6 8h12l1 12H5zM9 8V6a3 3 0 0 1 6 0v2',
+  supermarket: 'M3 5h2l2 8h10l2-5H6M9 19a1 1 0 1 0 0-2 1 1 0 0 0 0 2M17 19a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
   sight: 'M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6L12 16.8 6.7 19.6l1.1-6L3.4 9.4l6-.8z',
   lodging: 'M3 18v-8m0 5h18m0 3v-6a3 3 0 0 0-3-3h-7v6',
   other: PIN,

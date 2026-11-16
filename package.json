@@ -7,20 +7,28 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test src/logic.test.ts",
-    "check": "tsc --noEmit && npm test"
+    "test": "node --test src/logic.test.ts src/lib/db.test.ts",
+    "test:rls": "node --env-file=.env.local --test tests/rls.test.ts",
+    "test:e2e": "playwright test",
+    "check": "tsc --noEmit && npm test",
+    "db:start": "supabase start -x realtime,storage-api,imgproxy,edge-runtime,logflare,vector,supavisor",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > src/lib/database.types.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.0",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/google.maps": "^3.66.10",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "supabase": "^3.1.0",
     "typescript": "^7.0.2"
   }
 }

@@ -2,8 +2,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 // import: ./logic 모듈에서 유틸 함수와 타입(=DTO/interface)을 가져옴 (Java의 import static + 클래스)
 import {
-  addDays, catOf, fmtDay, placeUrl, ratingLabel, saveToVault, tabelogLink, uid,
-  type AppState, type Flight, type Item, type PlaceInfo, type PlaceRef, type Stay, type Trip,
+  addDays, CATS, catOf, fmtDay, placeUrl, ratingLabel, saveToVault, tabelogLink, uid,
+  type AppState, type Cat, type Collection, type Flight, type Item, type PlaceInfo, type PlaceRef, type Stay, type Trip,
 } from './logic'
 // import: 장소 캐시 모듈의 조회 함수와 Entry 타입
 import { infoOf, retry, type Entry } from './places'
@@ -32,6 +32,8 @@ type Props = {
   trip: Trip
   // 저장해 둔 장소 목록(보관함)
   vault: PlaceRef[]
+  /** 보관함 장소를 묶는 사용자 컬렉션. */
+  collections: Collection[]
   // 상태 수정 콜백: 함수를 받아 상태를 바꿔 달라고 부모에게 요청 (Consumer<BiConsumer> 느낌)
   up: (fn: (t: Trip, s: AppState) => void) => void
   // 현재 시트 모드
@@ -73,7 +75,7 @@ type Props = {
 // 항목이 추가된 뒤 부모에게 알리는 콜백
 }
 // Ctx: Props에서 필요한 필드만 골라낸(Pick) 타입에 두 메서드를 더한 공유 컨텍스트
-type Ctx = Pick<Props, 'trip' | 'vault' | 'up' | 'get' | 'day' | 'search' | 'nearbyStays'> & {
+type Ctx = Pick<Props, 'trip' | 'vault' | 'collections' | 'up' | 'get' | 'day' | 'search' | 'nearbyStays'> & {
   // 항목 추가 함수 시그니처 (item, 일차, 라벨)
   addItem: (item: Item, day: number, label: string) => void
   // 하단 메시지 표시 함수
@@ -109,7 +111,7 @@ export function Sheet(p: Props) {
   // 하위 컴포넌트에 내려줄 공유 컨텍스트 객체 (DI로 주입하는 서비스 묶음과 유사)
   const c: Ctx = {
     // 부모 props와 계산된 값을 필드로 채움
-    trip, vault: p.vault, up: p.up, get: p.get, day, search: p.search, nearbyStays: p.nearbyStays,
+    trip, vault: p.vault, collections: p.collections, up: p.up, get: p.get, day, search: p.search, nearbyStays: p.nearbyStays,
     // say는 단순히 메시지 상태를 바꾸는 setter
     say: setMsg,
     // 항목 추가 로직: 람다 (item, d, label) -> {...}
@@ -160,25 +162,25 @@ export function Sheet(p: Props) {
         </>
       )}
 
-      // 본문 영역: 모드와 탭에 따라 서로 다른 컴포넌트를 렌더링 (switch 대신 조건식)
+      {/* 본문 영역: 모드와 탭에 따라 서로 다른 컴포넌트를 렌더링 (switch 대신 조건식) */}
       <div className="sheet-body">
         {/* 장소 탭이면 PlaceTab 표시 */}
         {mode.type === 'add' && mode.tab === 'place' && (
           <PlaceTab c={c} explore={p.explore} selectedId={p.selectedResultId} onSelect={p.onSelectResult} onRetry={p.onRetrySearch} />
         )}
-        // 메모 탭이면 MemoForm 표시
+        {/* 메모 탭이면 MemoForm 표시 */}
         {mode.type === 'add' && mode.tab === 'memo' && <MemoForm c={c} />}
-        // 항공편 탭: key가 바뀌면 컴포넌트를 새로 생성(상태 초기화)
+        {/* 항공편 탭: key가 바뀌면 컴포넌트를 새로 생성(상태 초기화) */}
         {mode.type === 'add' && mode.tab === 'flight' && <FlightForm key={mode.editId} c={c} editId={mode.editId} />}
-        // 숙소 탭: 마찬가지로 key로 상태 초기화
+        {/* 숙소 탭: 마찬가지로 key로 상태 초기화 */}
         {mode.type === 'add' && mode.tab === 'stay' && <StayForm key={mode.editId} c={c} editId={mode.editId} />}
-        // 일정 항목 수정 화면
+        {/* 일정 항목 수정 화면 */}
         {mode.type === 'item' && <ItemEdit key={mode.id} c={c} day={mode.day} id={mode.id} close={close} />}
-        // 체크리스트 화면
+        {/* 체크리스트 화면 */}
         {mode.type === 'checklist' && <Checklist c={c} />}
-        // 가계부 화면
+        {/* 가계부 화면 */}
         {mode.type === 'budget' && <Budget c={c} />}
-        // 이미지 저장 화면
+        {/* 이미지 저장 화면 */}
         {mode.type === 'export' && <ExportPanel c={c} />}
       </div>
       {/* 하단 상태 메시지 (스크린리더에 알림) */}
@@ -227,7 +229,7 @@ export function placeName(e: Entry | undefined, alias?: string) {
 
 // ---------- 장소: 탐색 결과 / 보관함 ----------
 // PlaceCard: 장소 한 건을 카드로 그리는 컴포넌트
-function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void }) {
+function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void; inVault?: boolean }) {
   // 캐시에서 장소 항목 조회
   const e = c.get(id)
   // 항목에서 실제 장소 정보 추출 (없으면 undefined)
@@ -242,6 +244,8 @@ function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected
   const [time, setTime] = useState('')
   // 메모 상태
   const [memo, setMemo] = useState('')
+  // 예상 체류 시간(분). 빈 문자열이면 미지정
+  const [stay, setStay] = useState('')
   // 표시할 이름 계산
   const name = placeName(e, ref?.alias)
   // 타베로그 링크 (p가 있을 때만 계산, && 단축 평가)
@@ -252,9 +256,9 @@ function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected
     // 폼 기본 동작(페이지 새로고침) 막기
     ev.preventDefault()
     // 일정 항목 객체 생성 후 추가. 스프레드(...)로 값이 있을 때만 필드를 조건부로 포함
-    c.addItem({ id: uid(), kind: 'place', placeId: id, ...(time ? { time } : {}), ...(memo.trim() ? { memo: memo.trim() } : {}) }, day, name)
+    c.addItem({ id: uid(), kind: 'place', placeId: id, ...(time ? { time } : {}), ...(+stay > 0 ? { stay: Math.min(1440, Math.round(+stay)) } : {}), ...(memo.trim() ? { memo: memo.trim() } : {}) }, day, name)
     // 추가 후 폼 닫고 입력값 초기화
-    setAdding(false); setTime(''); setMemo('')
+    setAdding(false); setTime(''); setMemo(''); setStay('')
   }
   return (
     // 카드 루트 <li>: 선택되면 'sel' 클래스
@@ -266,23 +270,28 @@ function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected
         <b>{name}</b>
         {/* 장소 정보가 있을 때만 카테고리·주소 출력 */}
         {p && <small>{catOf(p.cat)?.label ?? '장소'} · {p.address}</small>}
-        // 평점 라벨 (평점이 없으면 'none' 클래스)
+        {/* 평점 라벨 (평점이 없으면 'none' 클래스) */}
         {p && <small className={'rating' + (p.rating == null ? ' none' : '')}>{ratingLabel(p)}</small>}
       </button>
       {/* 로딩 실패 시 에러 문구와 재시도 버튼 */}
       {e === 'error' && <p className="error">장소 정보를 불러오지 못했어요. <button type="button" className="link" onClick={() => retry(id)}>다시 시도</button></p>}
-      // 카드 하단 액션 영역
+      {/* 카드 하단 액션 영역 */}
       <div className="pcard-acts">
         {/* 외부 링크 묶음 */}
         <span className="pcard-links">
           {/* Google 지도 링크 (새 탭으로 열기) */}
           {p && <a className="link" href={placeUrl(p)} target="_blank" rel="noreferrer">Google 지도에서 보기</a>}
-          // 타베로그 링크가 있을 때만 표시
+          {/* 타베로그 링크가 있을 때만 표시 */}
           {tabelog && <a className="link" href={tabelog} target="_blank" rel="noreferrer">타베로그에서 확인</a>}
         </span>
         {/* 보관함 저장/해제 토글 버튼 */}
         <button type="button" className={'btn' + (ref ? ' on' : '')} aria-pressed={!!ref}
-          onClick={() => c.up((_, s) => { if (ref) s.vault = s.vault.filter(v => v.placeId !== id); else saveToVault(s.vault, { placeId: id }) })}>
+          onClick={() => c.up((_, s) => {
+            if (!ref) { saveToVault(s.vault, { placeId: id }); return }
+            // 보관함에서 빼면 컬렉션에서도 함께 뺀다 (DB 의 FK cascade 와 같은 규칙)
+            s.vault = s.vault.filter(v => v.placeId !== id)
+            s.collections.forEach(k => { k.placeIds = k.placeIds.filter(x => x !== id) })
+          })}>
           {/* 저장 여부에 따라 문구 변경 */}
           {ref ? '저장됨' : '보관함에 저장'}
         </button>
@@ -290,6 +299,32 @@ function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected
         <button type="button" className="btn strong" aria-expanded={adding} onClick={() => { setDay(c.day); setAdding(a => !a) }}>일정에 추가</button>
       </div>
       {/* adding이 true일 때만 폼 표시 */}
+      {/* 보관함 목록에서만: 장소별 내 메모와 컬렉션 지정 */}
+      {inVault && ref && (
+        <div className="vault-extra">
+          <Field label="내 메모">
+            <input defaultValue={ref.note ?? ''} maxLength={2000} placeholder="예: 예약 필수, 현금만 가능"
+              onBlur={ev => {
+                // 입력란을 벗어날 때 값이 바뀌었으면 저장
+                const n = ev.target.value.trim()
+                if (n !== (ref.note ?? '')) c.up((_, s) => { const v = s.vault.find(v => v.placeId === id); if (v) { if (n) v.note = n; else delete v.note } })
+              }} />
+          </Field>
+          {c.collections.length > 0 && (
+            <div className="chips" role="group" aria-label={`${name} 컬렉션`}>
+              {c.collections.map(k => {
+                const on = k.placeIds.includes(id)
+                return (
+                  <button key={k.id} type="button" className={'btn' + (on ? ' on' : '')} aria-pressed={on}
+                    onClick={() => c.up((_, s) => { const x = s.collections.find(x => x.id === k.id); if (x) x.placeIds = on ? x.placeIds.filter(v => v !== id) : [...x.placeIds, id] })}>
+                    {k.name}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {adding && (
         // 추가 폼: 제출 시 add 호출
         <form className="form add-form" onSubmit={add}>
@@ -301,6 +336,7 @@ function PlaceCard({ c, id, selected, onSelect }: { c: Ctx; id: string; selected
             <Field label="방문 시간 (선택)"><input type="time" value={time} onChange={ev => setTime(ev.target.value)} /></Field>
           </div>
           {/* 메모 입력 필드 */}
+          <Field label="예상 체류 시간 (분 · 선택)"><input type="number" min={1} max={1440} inputMode="numeric" value={stay} onChange={ev => setStay(ev.target.value)} placeholder="60" /></Field>
           <Field label="메모 (선택)"><input value={memo} onChange={ev => setMemo(ev.target.value)} placeholder="예약 번호, 주문할 메뉴 등" /></Field>
           {/* 폼 버튼 영역 */}
           <div className="form-actions">
@@ -336,18 +372,18 @@ function PlaceTab({ c, explore, selectedId, onSelect, onRetry }: { c: Ctx; explo
         <>
           {/* idle: 안내 문구 */}
           {explore.status === 'idle' && <p className="empty">지도 위 검색창에서 가게·관광지·주소를 검색하거나, 지도를 움직인 뒤 <b>이 지역 찾기</b> 버튼을 눌러보세요.</p>}
-          // loading: 로딩 문구
+          {/* loading: 로딩 문구 */}
           {explore.status === 'loading' && <p className="empty" role="status">{explore.title} 찾는 중…</p>}
-          // empty: 결과 없음 문구
+          {/* empty: 결과 없음 문구 */}
           {explore.status === 'empty' && <p className="empty">{explore.title} 결과가 없어요. 지도를 옮기거나 다른 검색어·카테고리로 찾아보세요.</p>}
-          // error: 에러 문구와 재시도 버튼
+          {/* error: 에러 문구와 재시도 버튼 */}
           {explore.status === 'error' && (
             <div className="empty" role="alert">
               <p className="error">장소를 불러오지 못했어요. {explore.message}</p>
               <button type="button" className="btn" onClick={onRetry}>다시 시도</button>
             </div>
           )}
-          // ok: 결과 목록 출력
+          {/* ok: 결과 목록 출력 */}
           {explore.status === 'ok' && (
             <>
               {/* 결과 제목과 출처 안내 */}
@@ -359,16 +395,67 @@ function PlaceTab({ c, explore, selectedId, onSelect, onRetry }: { c: Ctx; explo
         </>
       )}
 
-      // 보관함 탭: 비어있지 않으면 목록, 비어있으면 안내 (삼항 연산자)
-      {view === 'vault' && (c.vault.length
-        ? <ul className="list">{c.vault.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} />)}</ul>
-        : <p className="empty">보관함이 비어 있어요. 탐색 결과에서 <b>보관함에 저장</b>을 눌러보세요.</p>)}
+      {/* 보관함 탭: 비어있지 않으면 목록, 비어있으면 안내 (삼항 연산자) */}
+      {view === 'vault' && <VaultView c={c} />}
     </>
   )
 }
 
 // ---------- 메모 ----------
 // MemoForm: 메모 추가 폼
+/** 보관함: 카테고리·컬렉션 필터, 컬렉션 만들기/삭제, 장소별 메모. */
+function VaultView({ c }: { c: Ctx }) {
+  // 선택한 카테고리 ('' = 전체)
+  const [cat, setCat] = useState<Cat | ''>('')
+  // 선택한 컬렉션 id ('' = 전체)
+  const [col, setCol] = useState('')
+  // 새 컬렉션 이름 입력값
+  const [name, setName] = useState('')
+  const active = c.collections.find(x => x.id === col)
+  // 카테고리는 저장하지 않고 방금 불러온 장소 정보로 걸러낸다 (Google 데이터 비저장 원칙)
+  const list = c.vault.filter(v => (!cat || infoOf(c.get(v.placeId))?.cat === cat) && (!active || active.placeIds.includes(v.placeId)))
+  const create = (e: FormEvent) => {
+    e.preventDefault()
+    const n = name.trim()
+    if (!n) return
+    // 같은 이름은 DB 의 unique 제약에 걸리므로 미리 막는다
+    if (c.collections.some(x => x.name === n)) { c.say('같은 이름의 컬렉션이 이미 있어요'); return }
+    const id = uid()
+    c.up((_, s) => { s.collections.push({ id, name: n, placeIds: [] }) })
+    setName(''); setCol(id)
+    c.say(`‘${n}’ 컬렉션을 만들었어요. 장소 카드에서 눌러 담아보세요`)
+  }
+  if (!c.vault.length) return <p className="empty">보관함이 비어 있어요. 탐색 결과에서 <b>보관함에 저장</b>을 눌러보세요.</p>
+  return (
+    <>
+      <div className="vault-tools">
+        <div className="grid2">
+          <Field label="카테고리">
+            <select value={cat} onChange={e => setCat(e.target.value as Cat | '')}>
+              <option value="">전체</option>
+              {CATS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
+            </select>
+          </Field>
+          <Field label="컬렉션">
+            <select value={active ? col : ''} onChange={e => setCol(e.target.value)}>
+              <option value="">전체</option>
+              {c.collections.map(k => <option key={k.id} value={k.id}>{k.name} ({k.placeIds.length})</option>)}
+            </select>
+          </Field>
+        </div>
+        <form className="inline" onSubmit={create}>
+          <input value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder="새 컬렉션 (예: 오사카 맛집)" aria-label="새 컬렉션 이름" />
+          <button className="btn">컬렉션 만들기</button>
+          {active && <Del label="컬렉션 삭제" onDelete={() => { c.up((_, s) => { s.collections = s.collections.filter(x => x.id !== active.id) }); setCol('') }} />}
+        </form>
+      </div>
+      {list.length
+        ? <ul className="list">{list.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} inVault />)}</ul>
+        : <p className="empty">조건에 맞는 저장 장소가 없어요.</p>}
+    </>
+  )
+}
+
 function MemoForm({ c }: { c: Ctx }) {
   // 입력 텍스트 상태
   const [text, setText] = useState('')
@@ -453,11 +540,11 @@ function FlightForm({ c, editId }: { c: Ctx; editId?: string }) {
         </div>
         {/* 에러가 있을 때만 출력 */}
         {err && <p className="error" role="alert">{err}</p>}
-        // 폼 버튼 영역
+        {/* 폼 버튼 영역 */}
         <div className="form-actions">
           {/* 수정 중이면 '새로 입력' 버튼으로 초기화 */}
           {edit && <button type="button" className="btn" onClick={() => { setEdit(null); setF(blank) }}>새로 입력</button>}
-          // 제출 버튼: 수정/등록에 따라 문구 변경
+          {/* 제출 버튼: 수정/등록에 따라 문구 변경 */}
           <button className="btn primary">{edit ? '항공편 저장' : '항공편 등록'}</button>
         </div>
       </form>
@@ -584,7 +671,7 @@ function StayForm({ c, editId }: { c: Ctx; editId?: string }) {
             ))}
           </ul>
         ) : <p className="hint">검색 결과가 없어요. 다른 이름이나 지역명을 넣어보세요.</p>)}
-        // 선택한 숙소 이름 표시 (없으면 안내 문구)
+        {/* 선택한 숙소 이름 표시 (없으면 안내 문구) */}
         <div className="item-info"><small>선택한 숙소</small><b>{placeId ? placeName(c.get(placeId), init?.placeId === placeId ? init.alias : undefined) : '아직 선택하지 않았어요'}</b></div>
         {/* 2열 그리드 */}
         <div className="grid2">
@@ -595,11 +682,11 @@ function StayForm({ c, editId }: { c: Ctx; editId?: string }) {
         </div>
         {/* 에러가 있을 때만 출력 */}
         {err && <p className="error" role="alert">{err}</p>}
-        // 폼 버튼 영역
+        {/* 폼 버튼 영역 */}
         <div className="form-actions">
           {/* 수정 중이면 '새로 입력' 버튼 */}
           {edit && <button type="button" className="btn" onClick={() => load()}>새로 입력</button>}
-          // 제출 버튼: 수정/등록에 따라 문구 변경
+          {/* 제출 버튼: 수정/등록에 따라 문구 변경 */}
           <button className="btn primary">{edit ? '숙소 저장' : '숙소 등록'}</button>
         </div>
       </form>
@@ -638,6 +725,8 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
   const [alias, setAlias] = useState(item?.kind === 'place' ? item.alias ?? '' : '')
   // 방문 시간 상태
   const [time, setTime] = useState(item?.kind === 'place' ? item.time ?? '' : '')
+  // 예상 체류 시간(분)
+  const [stay, setStay] = useState(item?.kind === 'place' && item.stay ? String(item.stay) : '')
   // 메모 상태: 장소면 memo, 메모 항목이면 text
   const [memo, setMemo] = useState(item ? (item.kind === 'place' ? item.memo ?? '' : item.text) : '')
   // 이동할 일차 상태 (기본은 현재 일차)
@@ -669,6 +758,7 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
         if (alias.trim()) it.alias = alias.trim(); else delete it.alias
         // 시간도 동일하게 처리
         if (time) it.time = time; else delete it.time
+        if (+stay > 0) it.stay = Math.min(1440, Math.round(+stay)); else delete it.stay
         // 메모도 동일하게 처리
         if (memo.trim()) it.memo = memo.trim(); else delete it.memo
       // 메모 항목이면 text만 갱신
@@ -692,9 +782,9 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
             <b>{placeName(e)}</b>
             {/* 카테고리와 주소 */}
             {p && <small>{catOf(p.cat)?.label ?? '장소'} · {p.address}</small>}
-            // 평점
+            {/* 평점 */}
             {p && <small className="rating">{ratingLabel(p)}</small>}
-            // 정보가 있으면 링크들 표시
+            {/* 정보가 있으면 링크들 표시 */}
             {p && (
               // 링크 묶음
               <span className="pcard-links">
@@ -704,7 +794,7 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
                 {tabelogLink(p) && <a className="link" href={tabelogLink(p)!} target="_blank" rel="noreferrer">타베로그에서 확인</a>}
               </span>
             )}
-            // 로딩 실패 시 에러와 재시도 버튼
+            {/* 로딩 실패 시 에러와 재시도 버튼 */}
             {e === 'error' && <p className="error">장소 정보를 불러오지 못했어요. 메모와 시간은 그대로 있어요. <button type="button" className="link" onClick={() => retry(item.placeId)}>다시 시도</button></p>}
           </div>
           {/* 별칭 입력 */}
@@ -719,9 +809,15 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
               {time && <button type="button" className="btn" onClick={() => setTime('')}>시간 지우기</button>}
             </div>
           </Field>
+          <Field label="예상 체류 시간 (분 · 선택)"><input type="number" min={1} max={1440} inputMode="numeric" value={stay} onChange={ev => setStay(ev.target.value)} placeholder="60" /></Field>
+          {/* 일정에 있는 장소를 보관함(즐겨찾기)에 저장 */}
+          <button type="button" className={'btn' + (c.vault.some(v => v.placeId === item.placeId) ? ' on' : '')} disabled={c.vault.some(v => v.placeId === item.placeId)}
+            onClick={() => { c.up((_, s) => saveToVault(s.vault, { placeId: item.placeId })); c.say('보관함에 저장했어요') }}>
+            {c.vault.some(v => v.placeId === item.placeId) ? '보관함에 저장됨' : '보관함에 저장'}
+          </button>
         </>
       )}
-      // 메모 입력 (메모 항목이면 필수)
+      {/* 메모 입력 (메모 항목이면 필수) */}
       <Field label="메모"><textarea rows={4} value={memo} onChange={ev => setMemo(ev.target.value)} required={item.kind === 'memo'} /></Field>
       {/* 일차 변경 선택 */}
       <Field label="일차 (바꾸면 그날 맨 끝으로 이동)"><DaySelect trip={c.trip} value={to} onChange={setTo} /></Field>
@@ -924,7 +1020,7 @@ function ExportPanel({ c }: { c: Ctx }) {
       </div>
       {/* 에러가 있을 때만 출력 */}
       {err && <p className="error" role="alert">{err}</p>}
-      // 이미지가 있으면 미리보기 표시
+      {/* 이미지가 있으면 미리보기 표시 */}
       {url && <img className="preview" src={url} alt="저장한 일정 이미지 미리보기" />}
     </>
   )

@@ -287,7 +287,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
           {/* 여행 제목과 기간/도시 */}
           <div className="e-title">
             <h1>{trip.name}</h1>
-            <p>{fmtPeriod(trip.start, trip.end)} · {trip.city}</p>
+            <p>{fmtPeriod(trip.start, trip.end)} · {[trip.country, trip.city].filter(Boolean).join(' · ')}</p>
           </div>
           {/* 여행 정보 수정 버튼 */}
           <button type="button" className="icon" aria-label="여행 정보 수정" onClick={onEditTrip}><Icon d={I.edit} /></button>
@@ -463,6 +463,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                               <b>{placeName(e, it.alias)}</b>
                               {/* 시간이 있으면 표시 */}
                               {it.time && <em className="time">{it.time}</em>}
+                              {it.stay && <em className="time">{it.stay}분</em>}
                               {/* 카테고리/원래 이름, 실패 또는 로딩 상태 문구 */}
                               <small>
                                 {p ? `${catOf(p.cat)?.label ?? '장소'}${it.alias ? ` · ${p.name}` : ''}` : e === 'error' ? '장소 정보를 불러오지 못함 · 수정에서 다시 시도' : '불러오는 중…'}
@@ -536,7 +537,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
 
       {/* 시트가 열려 있을 때만 Sheet 컴포넌트 렌더링 (많은 props 와 콜백 전달) */}
       {sheet && (
-        <Sheet trip={trip} vault={state.vault} up={up} mode={sheet} setMode={setSheet} close={closeSheet} peek={peek} onPeek={() => setPeek(p => !p)}
+        <Sheet trip={trip} vault={state.vault} collections={state.collections} up={up} mode={sheet} setMode={setSheet} close={closeSheet} peek={peek} onPeek={() => setPeek(p => !p)}
           day={Math.min(addDay, n - 1)} setDay={setAddDay} get={get}
           explore={explore} selectedResultId={selResult} onSelectResult={id => selectResult(id, false)}
           onRetrySearch={() => { if (lastQuery.current) void run(lastQuery.current) }}

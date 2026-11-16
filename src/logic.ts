@@ -55,11 +55,13 @@ export type PlaceInfo = {
 
 // ---- 저장 모델: place ID + 사용자가 입력한 것만, 그 외 없음 ----
 // PlaceRef: 장소 ID + 사용자 별칭(선택)만 저장하는 참조 DTO
-export type PlaceRef = { placeId: string; alias?: string }
+export type PlaceRef = { placeId: string; alias?: string; note?: string }
+// Collection: 보관함 장소를 묶는 사용자 정의 폴더 (placeIds 는 보관함에 있는 장소만)
+export type Collection = { id: string; name: string; placeIds: string[] }
 // Item: 유니온 타입 = sealed interface (place 또는 memo 중 하나)
 export type Item =
   // kind가 "place"인 변형 (판별자 kind로 구분, instanceof 대신 사용)
-  | { id: string; kind: 'place'; placeId: string; alias?: string; time?: string; memo?: string }
+  | { id: string; kind: 'place'; placeId: string; alias?: string; time?: string; stay?: number; memo?: string } // stay = 예상 체류 시간(분)
   // kind가 "memo"인 변형
   | { id: string; kind: 'memo'; text: string }
 // Flight: 항공편 DTO (날짜/시각은 문자열로 보관)
@@ -72,17 +74,17 @@ export type Check = { id: string; text: string; done: boolean }
 export type Expense = { id: string; date: string; title: string; amount: number; currency: string }
 // Trip: 여행 DTO (Item[][] = List<List<Item>>, 일차별 일정)
 export type Trip = {
-  id: string; name: string; city: string; start: string; end: string
+  id: string; name: string; city: string; country?: string; start: string; end: string
   // days/flights/stays 등 하위 컬렉션 (T[] = List<T>)
   days: Item[][]; flights: Flight[]; stays: Stay[]; checklist: Check[]; expenses: Expense[]
 }
 // AppState: 앱 전체 저장 상태 (루트 DTO), version은 리터럴 2 고정
-export type AppState = { version: 2; trips: Trip[]; vault: PlaceRef[]; lastTripId?: string }
+export type AppState = { version: 2; trips: Trip[]; vault: PlaceRef[]; collections: Collection[]; lastTripId?: string }
 
 // DAY_COLORS: 일차별 색상 상수 배열 (static final List<String>)
 export const DAY_COLORS = ['#8b5cf6', '#ed1572', '#1f9bc5', '#f59e0b', '#10b981', '#ef4444', '#6366f1']
 // uid: 랜덤 8자리 id 생성 (36진수 문자열 변환 후 잘라냄, UUID 대용)
-export const uid = () => Math.random().toString(36).slice(2, 10)
+export const uid = (): string => crypto.randomUUID() // DB 기본키가 UUID 이므로 (Java 의 UUID.randomUUID())
 
 // ---- 날짜 (ISO yyyy-mm-dd, UTC로 계산해 서머타임이 하루를 밀지 않음) ----
 // D: ISO 날짜 문자열을 UTC 자정 Date로 변환 (LocalDate.parse 대용, 모듈 내부 전용=private)
@@ -311,7 +313,7 @@ export function validateState(x: unknown): AppState {
     // 객체 형식 검증
     const o = obj(v, '보관함 항목 형식이 올바르지 않습니다')
     // placeId 필수, alias는 있을 때만 포함 (...opt = 맵 병합 putAll)
-    return { placeId: str(o.placeId, '장소 ID 누락'), ...opt(o, 'alias') }
+    return { placeId: str(o.placeId, '장소 ID 누락'), ...opt(o, 'alias', 'note') }
   }
   // item: 일정 항목 검증/변환 (kind에 따라 분기)
   const item = (v: unknown): Item => {
@@ -324,7 +326,7 @@ export function validateState(x: unknown): AppState {
     // place도 아니면 예외
     if (o.kind !== 'place') fail('알 수 없는 일정 항목 종류')
     // place 항목 반환 (alias/time/memo 선택 필드만 복사)
-    return { id, kind: 'place', placeId: str(o.placeId, '장소 ID 누락'), ...opt(o, 'alias', 'time', 'memo') }
+    return { id, kind: 'place', placeId: str(o.placeId, '장소 ID 누락'), ...opt(o, 'alias', 'time', 'memo'), ...(typeof o.stay === 'number' && o.stay >= 1 && o.stay <= 1440 ? { stay: Math.round(o.stay) } : {}) }
   }
   // trip: 여행 한 건 검증/변환
   const trip = (v: unknown): Trip => {
@@ -339,7 +341,7 @@ export function validateState(x: unknown): AppState {
     // 검증된 값으로 Trip 객체를 새로 구성 (알 수 없는 필드는 버려짐)
     return {
       // id/이름/도시/기간/일차 설정 (o.city ?? "" = 기본값)
-      id: str(o.id, '여행 id 누락'), name: str(o.name, '여행 이름 누락'), city: str(o.city ?? '', '여행 도시 오류'), start, end, days,
+      id: str(o.id, '여행 id 누락'), name: str(o.name, '여행 이름 누락'), city: str(o.city ?? '', '여행 도시 오류'), ...opt(o, 'country'), start, end, days,
       // 항공편 목록 검증 후 변환
       flights: arr(o.flights ?? [], '항공편 목록 오류').map(f => {
         // 항공편 객체 검증
@@ -381,5 +383,32 @@ export function validateState(x: unknown): AppState {
   // 보관함 항목을 변환해 중복 없이 vault에 저장 (forEach = 반복문)
   arr(o.vault ?? [], '보관함 형식 오류').map(ref).forEach(r => saveToVault(vault, r))
   // 검증이 끝난 AppState 반환 (trips 변환 포함, lastTripId는 있을 때만)
-  return { version: 2, trips: arr(o.trips, 'trips 배열이 없습니다').map(trip), vault, ...opt(o, 'lastTripId') }
+  // 컬렉션: 보관함에 없는 장소 ID 는 버린다 (DB 의 FK 와 같은 규칙)
+  const saved = new Set(vault.map(v => v.placeId))
+  const collections: Collection[] = arr(o.collections ?? [], '컬렉션 형식 오류').map(c => {
+    const p = obj(c, '컬렉션 형식 오류')
+    const ids = arr(p.placeIds ?? [], '컬렉션 장소 형식 오류').filter((x): x is string => typeof x === 'string' && saved.has(x))
+    return { id: str(p.id, '컬렉션 id 누락'), name: str(p.name, '컬렉션 이름 누락'), placeIds: [...new Set(ids)] }
+  })
+  return { version: 2, trips: arr(o.trips, 'trips 배열이 없습니다').map(trip), vault, collections, ...opt(o, 'lastTripId') }
+}
+
+/** 가져오기·이관용: 모든 id 를 새 UUID 로 바꾼다 (예전 짧은 id, 다른 계정의 행과의 충돌 방지). */
+export function freshIds(s: AppState): AppState {
+  // 원본을 건드리지 않도록 깊은 복사 (Java 의 방어적 복사)
+  const d = structuredClone(s)
+  // 옛 여행 id → 새 id 매핑 (lastTripId 를 따라 바꾸기 위해)
+  const map = new Map<string, string>()
+  for (const t of d.trips) {
+    const id = uid()
+    map.set(t.id, id)
+    t.id = id
+    // 여행에 딸린 모든 하위 항목에도 새 id 부여
+    for (const x of [...t.days.flat(), ...t.flights, ...t.stays, ...t.checklist, ...t.expenses]) x.id = uid()
+  }
+  for (const c of d.collections) c.id = uid()
+  const last = d.lastTripId && map.get(d.lastTripId)
+  if (last) d.lastTripId = last
+  else delete d.lastTripId
+  return d
 }

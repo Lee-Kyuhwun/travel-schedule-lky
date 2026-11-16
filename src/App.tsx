@@ -12,12 +12,12 @@ import { Del } from './Sheet'
 import { Cover, I, Icon, Logo } from './Cover'
 
 // 여행 생성/수정 폼 데이터 타입 (DTO 클래스 역할)
-type TripForm = { name: string; city: string; start: string; end: string; moveTo: number }
+type TripForm = { name: string; city: string; country: string; start: string; end: string; moveTo: number }
 
 // 앱 최상위 컴포넌트 (Spring 의 메인 컨트롤러 같은 진입점)
 export default function App() {
   // 전역 상태와 변경/교체 함수를 구조분해로 받음
-  const { state, update, replace } = useStore()
+  const { state, update, replace, status, error, email, signOut } = useStore()
   // URL 해시(#/trip/..) 상태: 간단한 라우팅에 사용
   const [hash, setHash] = useState(location.hash)
   // 여행 추가/수정 다이얼로그 상태 (null 이면 닫힘)
@@ -53,14 +53,17 @@ export default function App() {
         // 대상 여행 찾기
         const t = s.trips.find(t => t.id === editing.id)
         // 있으면 필드들을 한 번에 덮어씀 (일차 수는 resizeDays 로 조정)
-        if (t) Object.assign(t, { name: f.name, city: f.city, start: f.start, end: f.end, days: resizeDays(t.days, n, f.moveTo) })
+        if (!t) return
+        Object.assign(t, { name: f.name, city: f.city, start: f.start, end: f.end, days: resizeDays(t.days, n, f.moveTo) })
+        // 국가는 선택 값: 비우면 키를 지운다
+        if (f.country) t.country = f.country; else delete t.country
       })
     // 신규 모드
     } else {
       // 새 id 생성
       const id = uid()
       // 빈 여행 객체를 목록에 추가
-      update(s => { s.trips.push({ id, name: f.name, city: f.city, start: f.start, end: f.end, days: resizeDays([], n), flights: [], stays: [], checklist: [], expenses: [] }) })
+      update(s => { s.trips.push({ id, name: f.name, city: f.city, ...(f.country ? { country: f.country } : {}), start: f.start, end: f.end, days: resizeDays([], n), flights: [], stays: [], checklist: [], expenses: [] }) })
       // 만든 여행을 바로 열기
       open(id)
     }
@@ -101,11 +104,16 @@ export default function App() {
   return (
     <>
       {/* 여행이 선택되면 편집 화면, 아니면 홈 화면 (삼항 연산자). props 는 생성자 인자처럼 전달 */}
-      {trip
+      {/* 첫 조회가 끝나기 전에는 빈 화면 대신 안내를 보여준다 */}
+      {status === 'loading' ? <p className="empty boot" role="status">여행을 불러오는 중…</p> : trip
         ? <Editor key={trip.id} trip={trip} state={state} update={update} onBack={() => { location.hash = '' }} onEditTrip={() => setDialog({ trip })} />
-        : <Home state={state} notice={notice} onOpen={open} onNew={() => setDialog({})} onEdit={t => setDialog({ trip: t })}
+        : <Home state={state} notice={notice} email={email} onSignOut={() => void signOut()} onOpen={open} onNew={() => setDialog({})} onEdit={t => setDialog({ trip: t })}
             onDelete={id => update(s => { s.trips = s.trips.filter(t => t.id !== id) })} onExport={exportJson} onImport={importJson} />}
       {/* dialog 상태가 있으면 여행 다이얼로그 표시 (&& 조건부 렌더링) */}
+      {/* 저장 상태 표시: 저장 중 / 저장됨 / 실패 (E2E 테스트도 이 값을 기다린다) */}
+      {status !== 'loading' && <p className={'sync ' + status} role="status" aria-live="polite" data-sync={status}>{status === 'saving' ? '저장 중…' : status === 'error' ? '저장 실패' : '저장됨'}</p>}
+      {/* 조회·저장 오류 안내 (실패 시 변경은 이미 되돌려져 있다) */}
+      {error && <p className="sync-error" role="alert">{error}</p>}
       {dialog && <TripDialog trip={dialog.trip} onClose={() => setDialog(null)} onSave={saveTrip} />}
     </>
   )
@@ -114,7 +122,7 @@ export default function App() {
 // 홈 화면 컴포넌트. p 는 props 객체(생성자 인자 DTO), 인라인 타입으로 정의
 function Home(p: {
   // 전체 상태와 알림
-  state: AppState; notice: { ok: boolean; text: string } | null
+  state: AppState; notice: { ok: boolean; text: string } | null; email: string; onSignOut: () => void
   // 열기/새로만들기/수정/삭제 콜백 (함수형 인터페이스)
   onOpen: (id: string) => void; onNew: () => void; onEdit: (t: Trip) => void; onDelete: (id: string) => void
   // 내보내기/가져오기 콜백
@@ -134,6 +142,9 @@ function Home(p: {
         <Logo />
         {/* 새 여행 버튼: onClick 에 콜백 연결 */}
         <button type="button" className="btn" onClick={p.onNew}><Icon d={I.plus} size={16} />새 여행</button>
+        {/* 로그인한 계정과 로그아웃 */}
+        <span className="who" title={p.email}>{p.email}</span>
+        <button type="button" className="btn" onClick={p.onSignOut}>로그아웃</button>
       </header>
 
       {/* 인사 문구 영역 */}
@@ -153,7 +164,7 @@ function Home(p: {
           <div className="hero-top"><span className="badge solid">최근 여행</span><span className="pill glass">{dday(recent)}</span></div>
           <div className="hero-body">
             {/* 도시명 */}
-            <p className="eyebrow">{recent.city}</p>
+            <p className="eyebrow">{where(recent)}</p>
             {/* 여행 이름 */}
             <h2>{recent.name}</h2>
             {/* 기간/일수/장소수 요약 */}
@@ -199,7 +210,7 @@ function Home(p: {
             {/* 카드 하단 정보 */}
             <div className="trip-info">
               {/* 도시명 */}
-              <p className="eyebrow">{t.city}</p>
+              <p className="eyebrow">{where(t)}</p>
               {/* 여행 이름 */}
               <h3>{t.name}</h3>
               {/* 요약 정보 */}
@@ -214,7 +225,7 @@ function Home(p: {
       {/* 하단 푸터 */}
       <footer className="home-foot">
         {/* 저장 방식 안내 문구 */}
-        <p>여행·일정·보관함은 이 브라우저(localStorage)에 자동 저장돼요. 장소는 ID만 저장하고 이름·평점은 열 때마다 다시 불러와요.</p>
+        <p>여행·일정·보관함은 내 계정에 자동 저장되어 다른 기기에서도 이어서 볼 수 있어요. 장소는 ID만 저장하고 이름·평점은 열 때마다 다시 불러와요.</p>
         <div className="chips">
           {/* JSON 내보내기 버튼 */}
           <button type="button" className="btn" onClick={p.onExport}>JSON 내보내기</button>
@@ -244,6 +255,9 @@ function dday(t: Trip) {
   return left > 0 ? `D-${left}` : today <= t.end ? '여행 중' : '다녀온 여행'
 }
 // 여행 요약(기간/일수/장소 수) 컴포넌트. { t } 는 props 구조분해
+// 카드에 표시할 여행지: '국가 · 도시' (국가가 없으면 도시만)
+const where = (t: Trip) => [t.country, t.city].filter(Boolean).join(' · ')
+
 function Stats({ t }: { t: Trip }) {
   return (
     <ul className="pills">
@@ -267,6 +281,8 @@ function TripDialog({ trip, onClose, onSave }: { trip?: Trip; onClose: () => voi
   const [name, setName] = useState(trip?.name ?? '')
   // 도시 상태
   const [city, setCity] = useState(trip?.city ?? '')
+  // 국가 (선택 입력)
+  const [country, setCountry] = useState(trip?.country ?? '')
   // 시작일 상태 (기본 오늘)
   const [start, setStart] = useState(trip?.start ?? today)
   // 종료일 상태 (기본 오늘+2일)
@@ -291,7 +307,7 @@ function TripDialog({ trip, onClose, onSave }: { trip?: Trip; onClose: () => voi
     // 최대 60일 검증
     if (n > 60) { setErr('여행 기간은 최대 60일까지예요.'); return }
     // 검증 통과: 공백 제거한 값들로 부모의 onSave 호출
-    onSave({ name: name.trim(), city: city.trim(), start, end, moveTo: Math.min(moveTo, n - 1) })
+    onSave({ name: name.trim(), city: city.trim(), country: country.trim(), start, end, moveTo: Math.min(moveTo, n - 1) })
   }
   return (
     // 네이티브 모달 다이얼로그 (닫히면 onClose 콜백)
@@ -301,9 +317,11 @@ function TripDialog({ trip, onClose, onSave }: { trip?: Trip; onClose: () => voi
         {/* 제목: 수정/신규 분기 */}
         <h2>{trip ? '여행 수정' : '새 여행'}</h2>
         {/* 이름 입력: value+onChange 로 상태와 양방향 동기화 */}
-        <label className="field"><span>여행 이름</span><input value={name} onChange={e => setName(e.target.value)} placeholder="간사이 3일 여행" required /></label>
+        <label className="field"><span>여행 이름</span><input value={name} onChange={e => setName(e.target.value)} placeholder="간사이 3일 여행" maxLength={100} required /></label>
         {/* 도시 입력 */}
         <label className="field"><span>여행 도시</span><input value={city} onChange={e => setCity(e.target.value)} placeholder="오사카 · 교토" required /></label>
+        {/* 국가 입력 (선택) */}
+        <label className="field"><span>국가 (선택)</span><input value={country} onChange={e => setCountry(e.target.value)} placeholder="일본" maxLength={60} /></label>
         {/* 시작/종료일 2열 배치 */}
         <div className="grid2">
           {/* 시작일: 종료일이 더 앞서면 종료일도 같이 맞춤 */}

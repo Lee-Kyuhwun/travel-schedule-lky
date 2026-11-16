@@ -1,0 +1,19 @@
+# 의존성 / 빌드 산출물
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# 환경변수 (키/비밀값) — .env.example 만 커밋
+.env
+.env.*
+!.env.example
+
+# OS / 에디터 / 로그
+.DS_Store
+*.log
+.idea/
+.vscode/
+.claude/settings.local.json

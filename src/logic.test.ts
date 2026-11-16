@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 // 테스트 대상 함수/타입 import (Java의 static import, type = 타입 전용 import)
 import {
   addDays, catOfTypes, dayCount, placeUrl, dirUrl, distance, fmtDist, legs, ratingLabel, resizeDays, saveToVault, sortResults,
-  suggestOrder, tabelogLink, validateState, viewOf, type AppState, type Item, type LatLng, type PlaceInfo,
+  freshIds, suggestOrder, tabelogLink, validateState, viewOf, type AppState, type Item, type LatLng, type PlaceInfo,
 } from './logic.ts'
 
 // at: 장소 id → 좌표 테스트용 고정 데이터 (Map<String, LatLng>)
@@ -152,7 +152,7 @@ test('기간 축소 시 넘치는 일정은 선택한 날로 이동', () => {
 // @Test: 저장/백업에는 ID와 사용자 입력만 남음
 test('저장·백업에는 place ID와 사용자 입력만 남는다', () => {
   // 정상 AppState 샘플 (객체 리터럴 = DTO 인스턴스)
-  const s: AppState = { version: 2, vault: [], trips: [{
+  const s: AppState = { version: 2, vault: [], collections: [], trips: [{
     // 여행 기본 정보
     id: 't1', name: '테스트', city: '오사카', start: '2026-12-11', end: '2026-12-12',
     // 일정/항공/숙소 등
@@ -183,4 +183,33 @@ test('저장·백업에는 place ID와 사용자 입력만 남는다', () => {
   bad.trips[0].days.pop() // 기간과 일차 수 불일치
   // 일차 수 불일치 → 예외
   assert.throws(() => validateState(bad))
+})
+
+// freshIds: 가져온 데이터의 id 를 모두 새 UUID 로 교체하는지 검증 (JUnit @Test)
+test('가져오기 시 모든 id 를 새 UUID 로 바꾸고 lastTripId 를 따라 바꾼다', () => {
+  const s: AppState = { version: 2, vault: [{ placeId: 'p1' }], collections: [{ id: 'c1', name: '맛집', placeIds: ['p1'] }], lastTripId: 't1', trips: [{
+    id: 't1', name: 'a', city: '', start: '2026-12-11', end: '2026-12-11',
+    days: [[{ id: 'a', kind: 'place', placeId: 'p1' }]], flights: [], stays: [], checklist: [{ id: 'k', text: '여권', done: false }], expenses: [],
+  }] }
+  const f = freshIds(s)
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/
+  assert.match(f.trips[0].id, uuid)
+  assert.match(f.trips[0].days[0][0].id, uuid)
+  assert.match(f.trips[0].checklist[0].id, uuid)
+  assert.match(f.collections[0].id, uuid)
+  assert.equal(f.lastTripId, f.trips[0].id)
+  assert.equal(s.trips[0].id, 't1') // 원본은 그대로
+  assert.deepEqual(f.collections[0].placeIds, ['p1']) // 장소 ID 는 바뀌지 않는다
+})
+
+// validateState: 새 필드(체류 시간·국가·메모·컬렉션)를 보존하고 잘못된 값은 버리는지 검증
+test('체류 시간·국가·보관함 메모·컬렉션은 검증 후 유지된다', () => {
+  const v = validateState({ version: 2, vault: [{ placeId: 'p1', note: '예약 필수' }],
+    collections: [{ id: 'c1', name: '맛집', placeIds: ['p1', 'p1', 'ghost'] }],
+    trips: [{ id: 't', name: 'a', city: 'b', country: '일본', start: '2026-12-11', end: '2026-12-11',
+      days: [[{ id: 'a', kind: 'place', placeId: 'p1', stay: 90 }, { id: 'b', kind: 'place', placeId: 'p1', stay: -5 }]] }] })
+  assert.equal(v.trips[0].country, '일본')
+  assert.deepEqual(v.trips[0].days[0].map(i => (i.kind === 'place' ? i.stay : null)), [90, undefined])
+  assert.equal(v.vault[0].note, '예약 필수')
+  assert.deepEqual(v.collections, [{ id: 'c1', name: '맛집', placeIds: ['p1'] }]) // 중복·보관함에 없는 ID 제거
 })

@@ -1,24 +1,47 @@
 # PINLOG — 지도 기반 여행 일정 편집 · 장소 탐색
 
-Next.js 16 (App Router, Turbopack) + React + TypeScript + Supabase.
+Next.js 16 (App Router, Turbopack) + React + TypeScript + Supabase (Postgres · Auth · RLS).
+여행·일정·보관함은 로그인한 계정에 저장되어 어느 기기에서든 복원됩니다.
 
 ## 실행
 
 ```bash
 npm install
 cp .env.example .env.local   # 키 입력
-npm run dev      # http://localhost:3000
-npm run check    # 타입 검사 + 로직 단위 테스트
-npm run build
+npm run db:start             # 로컬 Supabase (Docker 필요). 마이그레이션이 자동 적용됨
+npx supabase status          # API URL / publishable key 확인 → .env.local 에 입력
+npm run dev                  # http://localhost:3000
 ```
 
-## Supabase 설정
+| 명령 | 내용 |
+|---|---|
+| `npm run check` | 타입 검사 + 단위 테스트 |
+| `npm run test:rls` | 실제 DB 에 사용자 A·B 를 만들어 RLS 를 검증 |
+| `npm run test:e2e` | Playwright (데스크톱 + 모바일). 포트가 다르면 `E2E_BASE_URL=http://localhost:3001` |
+| `npm run db:reset` | 로컬 DB 를 비우고 마이그레이션 재적용 |
+| `npm run db:types` | `src/lib/database.types.ts` 재생성 |
 
-1. Supabase 프로젝트 생성 → Project Settings > API 의 URL / anon key 를 `.env.local` 에 입력
-2. `supabase/schema.sql` 을 SQL Editor 에서 실행 (trips 테이블 + RLS)
-3. `GET /api/v1/health` 가 `{"data":{"status":"ok"}}` 이면 연결 성공
+## 구조
 
-현재 저장은 아직 브라우저 `localStorage` 입니다. 다음 단계: Supabase Auth → `src/store.ts` 를 DB 읽기/쓰기로 교체. 설계 근거는 `docs/adr-0001-nextjs-supabase.md`.
+| 경로 | 역할 (Java 로 치면) |
+|---|---|
+| `src/proxy.ts` | 세션 갱신 + 비로그인 차단 (Filter) |
+| `src/app/login`, `src/app/auth/confirm` | 로그인·회원가입, 이메일 인증/OAuth 콜백 |
+| `src/lib/supabase/{client,server,env}.ts` | 브라우저/서버 클라이언트, env 검증 |
+| `src/lib/db.ts` | 데이터 접근 계층 (Repository): 조회 조립, 변경분 저장 |
+| `src/store.ts` | 상태 + 동기화: 낙관적 업데이트, 실패 시 롤백 |
+| `supabase/migrations/` | 스키마 · RLS · RPC (버전 관리) |
+
+DB 설계와 ERD 는 `docs/database.md`, 결정 배경은 `docs/adr-0001-nextjs-supabase.md`.
+
+## 클라우드 Supabase / Vercel 연결
+
+1. Supabase 프로젝트 생성 → `docs/database.md` 의 "운영 DB 에 적용하기" 실행
+2. Authentication > URL Configuration: Site URL 과 Redirect URL 에 `https://<도메인>/auth/confirm` 추가
+3. Vercel 프로젝트 환경변수(Production / Preview / Development): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`
+4. Google Cloud 의 API 키 HTTP 리퍼러에 배포 도메인 추가
+
+service role / secret 키는 이 앱에서 쓰지 않습니다. 넣지 마세요.
 
 ## Google Maps
 

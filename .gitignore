@@ -17,3 +17,9 @@ next-env.d.ts
 .idea/
 .vscode/
 .claude/settings.local.json
+
+# 테스트 산출물 / 로컬 Supabase 임시 파일
+test-results/
+playwright-report/
+supabase/.temp/
+supabase/.branches/

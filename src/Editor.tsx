@@ -2,17 +2,17 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 // 도메인 로직 유틸 함수/상수와 타입들 (Java의 static 유틸 + DTO import)
 import {
-  CATS, DAY_COLORS, addDays, catOf, dayCount, dirUrl, fmtDay, fmtDist, fmtPeriod, legs, routeLength, sortResults, suggestOrder,
+  CATS, DAY_COLORS, addDays, catOf, dayCount, dirUrl, fmtDay, fmtDist, fmtPeriod, legs, placeUrl, ratingLabel, routeLength, saveToVault, sortResults, suggestOrder, tabelogLink,
   type AppState, type Cat, type Item, type LatLng, type Stop, type Trip, type View,
 } from './logic'
 // 장소 정보 조회/캐시/검색 관련 함수들 (서비스 계층과 유사)
-import { ensure, infoOf, remember, retry, searchNearby, searchText, usePlaces } from './places'
+import { ensure, infoOf, remember, retry, retryDetail, searchNearby, searchText, useDetail, usePlaces } from './places'
 // 지도 props 타입과 핀 타입
 import type { MapProps, Pin } from './MapView'
 // 구글 지도 컴포넌트
 import { GoogleMap } from './GoogleMap'
 // 바텀시트 컴포넌트와 관련 타입/함수
-import { Sheet, placeName, type Explore, type SheetMode } from './Sheet'
+import { Del, Sheet, placeName, type Explore, type SheetMode } from './Sheet'
 // 카테고리 아이콘/아이콘 상수와 아이콘 컴포넌트
 import { CAT_ICON, I, Icon } from './Cover'
 
@@ -54,6 +54,9 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
   const tab = tabRaw !== 'all' && tabRaw >= n ? 'all' : tabRaw
   // 선택된 일정 항목 id
   const [sel, setSel] = useState<string | null>(null)
+  // 선택 삭제 모드 여부 / 고른 항목 id 목록 (일차를 넘어 함께 고를 수 있다)
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
   // 열려 있는 바텀시트 모드 (null 이면 닫힘)
   const [sheet, setSheet] = useState<SheetMode | null>(null)
   // 항목을 추가할 대상 일차
@@ -139,6 +142,23 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
   const results = useMemo(() => explore.items.map(p => ({ lat: p.lat, lng: p.lng, id: p.id, cat: p.cat, name: p.name })), [explore.items])
   // 조회에 실패한 장소 id 목록 (Set 으로 중복 제거 후 필터)
   const failed = [...new Set(ids)].filter(id => get(id) === 'error')
+  // 지도에서 누른 장소의 상세 카드: 방금 고른 탐색 결과를 먼저, 없으면 선택한 일정 항목을 보여준다.
+  const detail = useMemo(() => {
+    // 탐색 결과를 눌렀다면 그 장소 정보를 그대로 사용
+    const picked = explore.items.find(p => p.id === selResult)
+    if (picked) return { p: picked, alias: undefined as string | undefined, inPlan: false }
+    // 일정 핀이면 그 항목의 장소 정보(별칭 포함)를 사용
+    const it = trip.days.flat().find(x => x.id === sel)
+    if (!it || it.kind !== 'place') return null
+    const p = infoOf(get(it.placeId))
+    return p ? { p, alias: it.alias, inPlan: true } : null
+  }, [explore.items, selResult, trip.days, sel, get])
+  // 상세 카드의 장소가 이미 보관함에 있는지
+  const saved = !!detail && state.vault.some(v => v.placeId === detail.p.id)
+  // 선택된 장소의 구글 상세(사진·요약·후기). 카드가 열릴 때만 조회한다
+  const rich = useDetail(detail?.p.id, detail?.p.country)
+  // rich 는 'loading'/'error' 문자열일 수 있으므로 내용이 있는 객체만 꺼내 쓴다
+  const rd = rich && typeof rich === 'object' ? rich : null
 
   // 항공/숙소 예약을 한 줄씩 표시할 목록으로 변환
   const bookings: Booking[] = [
@@ -190,6 +210,21 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
     if (to < 0 || to >= trip.days[day].length || from === to) return
     // 배열에서 항목을 빼서 새 위치에 끼워 넣음 (splice = List.remove + add)
     up(t => { const l = t.days[day]; l.splice(to, 0, l.splice(from, 1)[0]) })
+  }
+  // ---- 선택 삭제 ----
+  // 선택 모드를 끄고 고른 항목을 비운다
+  const endPick = () => { setPicking(false); setPicked([]) }
+  // 한 항목을 고르거나 해제
+  const togglePick = (id: string) => setPicked(list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]))
+  // 고른 항목들을 모든 일차에서 한 번에 지운다
+  const deletePicked = () => {
+    // 고른 게 없으면 아무 것도 하지 않음
+    if (!picked.length) return
+    // 각 일차에서 고른 id 를 제외한 목록으로 교체
+    up(t => { t.days = t.days.map(list => list.filter(it => !picked.includes(it.id))) })
+    // 지운 항목이 선택돼 있었으면 선택도 해제
+    if (sel && picked.includes(sel)) setSel(null)
+    endPick()
   }
 
   // ---- 탐색 동작 ----
@@ -248,13 +283,10 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
       { timeout: 10000, maximumAge: 60000 },
     )
   }
-  // 검색 결과 선택 (지도에서 눌렀으면 시트를 열고 해당 카드로 스크롤)
-  const selectResult = (id: string, fromMap: boolean) => {
-    // 선택 결과 id 저장
-    setSelResult(id)
-    // 지도에서 선택한 경우 시트를 열고 목록에서 해당 카드로 스크롤
-    if (fromMap) { openSheet({ type: 'add', tab: 'place' }); scrollToEl('rc-' + id, 'nearest') }
-  }
+  // 검색 결과 선택: 지도에 상세 카드를 띄우고 목록 카드를 강조한다.
+  const selectResult = (id: string) => setSelResult(id)
+  // 상세 카드에서 '일정에 추가': 목록 카드의 추가 폼을 열어 준다 (날짜·시간은 거기서 고른다)
+  const addFromMap = (id: string) => { openSheet({ type: 'add', tab: 'place' }); scrollToEl('rc-' + id, 'nearest') }
 
   // 일정 항목을 길찾기용 Stop 으로 변환
   const stopOf = (it: Item): Stop => {
@@ -313,7 +345,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
         <MapImpl pins={pins} results={results} selectedId={sel} selectedResultId={selResult} fitKey={trip.id + ':' + tab + (sheet ? ':sheet' : '')}
           focus={focus} me={me}
           onPin={id => { setSel(id); scrollToEl('it-' + id, 'center') }}
-          onResult={id => selectResult(id, true)}
+          onResult={selectResult}
           onView={v => { view.current = v; setMoved(true) }} />
         {/* 지도 위에 얹는 UI */}
         <div className="map-ui">
@@ -338,9 +370,99 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
           {/* 위치 관련 안내 메시지 (있을 때만) */}
           {geo.msg && <p className="map-note" role="status">{geo.msg} <button type="button" className="link" onClick={() => setGeo({})}>닫기</button></p>}
         </div>
-        {/* 지도가 움직였고 로딩 중이 아니면 이 지역 재검색 버튼 표시 */}
-        {moved && explore.status !== 'loading' && (
+        {/* 지도가 움직였고 로딩 중이 아니면 이 지역 재검색 버튼 표시 (상세 카드가 열리면 자리 양보) */}
+        {moved && !detail && explore.status !== 'loading' && (
           <button type="button" className="map-find" onClick={() => void run({ kind: 'nearby', cat })}><Icon d={I.search} size={14} />이 지역 {catOf(cat)!.find} 찾기</button>
+        )}
+        {/* 지도에서 장소를 누르면 그 자리에서 뜨는 상세 카드 */}
+        {detail && (
+          <section className="map-card" aria-label={`${detail.alias ?? detail.p.name} 상세`}>
+            {/* 닫기 버튼: 선택 해제 */}
+            <button type="button" className="icon map-card-x" aria-label="상세 닫기" onClick={() => { setSelResult(null); setSel(null) }}><Icon d={I.close} size={16} /></button>
+            {/* 아이콘 + 이름 + 카테고리·주소 */}
+            <div className="map-card-head">
+              <span className="tile"><Icon d={CAT_ICON[detail.p.cat ?? 'other']} /></span>
+              <div>
+                <b>{detail.alias ?? detail.p.name}</b>
+                <small>{catOf(detail.p.cat)?.label ?? '장소'} · {detail.p.address}</small>
+              </div>
+            </div>
+            {/* 평점 (없으면 '평점 없음') + 가격대 */}
+            <div className="map-rating">
+              <small className={'rating' + (detail.p.rating == null ? ' none' : '')}>{ratingLabel(detail.p)}</small>
+              {rich && typeof rich === 'object' && rich.price && <small>{rich.price}</small>}
+            </div>
+            {/* 구글 상세: 무슨 집인지 알려주는 내용 (불러오는 중/실패 상태도 표시) */}
+            {rich === 'loading' && <p className="hint">장소 정보 불러오는 중…</p>}
+            {rich === 'error' && (
+              <p className="hint">장소 정보를 불러오지 못했어요. <button type="button" className="link" onClick={() => retryDetail(detail.p.id, detail.p.country)}>다시 시도</button></p>
+            )}
+            {/* 업종 (카테고리보다 세부: 예 '게 요리 전문점') */}
+            {rd?.type && rd.type !== (catOf(detail.p.cat)?.label ?? '') && <p className="map-type">{rd.type}</p>}
+            {/* 구글 편집 요약: 한 줄로 어떤 곳인지 설명 */}
+            {rd?.summary && <p className="map-summary">{rd.summary}</p>}
+            {/* 오늘 영업시간 */}
+            {rd?.hours && <p className="map-hours">{rd.hours}</p>}
+            {/* Gemini 후기 요약: 사람들이 뭐라고 하는지 한눈에 */}
+            {rd?.reviewSummary && (
+              <div className="map-gist">
+                <p>{rd.reviewSummary.text}</p>
+                <small>{rd.reviewSummary.note ?? '후기 요약'}</small>
+              </div>
+            )}
+            {/* 사진이 오면 사진 줄 (프로젝트 권한에 따라 비어 있을 수 있다) */}
+            {!!rd?.photos.length && (
+              <div className="map-photos">
+                {rd.photos.map((ph, i) => (
+                  <figure key={i} className="map-photo">
+                    <img src={ph.url} alt={`${detail.alias ?? detail.p.name} 사진 ${i + 1}`} loading="lazy" />
+                    {ph.credit && <figcaption>{ph.credit}</figcaption>}
+                  </figure>
+                ))}
+              </div>
+            )}
+            {/* 후기 원문이 오면 목록 (본문은 3줄까지) */}
+            {!!rd?.reviews.length && (
+              <ul className="map-reviews">
+                {rd.reviews.slice(0, 3).map((r, i) => (
+                  <li key={i}>
+                    <span className="map-review-head"><b>{r.author}</b>{r.rating != null && <em>★ {r.rating}</em>}{r.when && <small>{r.when}</small>}</span>
+                    <p>{r.text}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* 외부 링크: 구글 지도, 일본 음식점이면 타 베로그 */}
+            <span className="pcard-links">
+              <a className="link" href={placeUrl(detail.p)} target="_blank" rel="noreferrer">Google 지도</a>
+              {/* 구글 사진·후기 탭: 사진·후기 원문이 안 올 때도 여기서 바로 볼 수 있다 */}
+              {rd?.photosUrl && <a className="link" href={rd.photosUrl} target="_blank" rel="noreferrer">사진 보기</a>}
+              {rd?.reviewsUrl && <a className="link" href={rd.reviewsUrl} target="_blank" rel="noreferrer">후기 보기</a>}
+              {rd?.website && <a className="link" href={rd.website} target="_blank" rel="noreferrer">홈페이지</a>}
+              {/* 타베로그: 일본어 매장명·지역으로 검색해야 그 가게가 나온다 */}
+              {tabelogLink(detail.p, { name: rd?.nativeName, area: rd?.nativeArea }) && (
+                <a className="link" href={tabelogLink(detail.p, { name: rd?.nativeName, area: rd?.nativeArea })!} target="_blank" rel="noreferrer">타베로그</a>
+              )}
+            </span>
+            {/* 저장·추가 동작 */}
+            <div className="pcard-acts">
+              <button type="button" className={'btn' + (saved ? ' on' : '')} aria-pressed={saved}
+                onClick={() => up((_, s) => {
+                  // 이미 저장됨: 보관함과 컬렉션에서 함께 제거
+                  if (saved) {
+                    s.vault = s.vault.filter(v => v.placeId !== detail.p.id)
+                    s.collections.forEach(k => { k.placeIds = k.placeIds.filter(x => x !== detail.p.id) })
+                    return
+                  }
+                  // 아니면 보관함에 새로 저장 (같은 장소는 한 번만)
+                  saveToVault(s.vault, { placeId: detail.p.id })
+                })}>{saved ? '저장됨' : '보관함에 저장'}</button>
+              {/* 일정 항목이 아닌 탐색 결과만: 목록 카드의 추가 폼 열기 */}
+              {!detail.inPlan && (
+                <button type="button" className="btn strong" onClick={() => addFromMap(detail.p.id)}>일정에 추가</button>
+              )}
+            </div>
+          </section>
         )}
       </div>
 
@@ -357,8 +479,20 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
             </button>
           ))}
         </div>
-        {/* 장소 추가 버튼 */}
-        <button type="button" className="btn primary" onClick={() => openSheet({ type: 'add', tab: 'place' })}><Icon d={I.plus} size={16} />추가</button>
+        {/* 선택 모드면 일괄 삭제 버튼을, 아니면 선택·추가 버튼을 보여준다 */}
+        {picking ? (
+          <>
+            {/* 두 번 눌러 확인하는 삭제 버튼 (기존 Del 컴포넌트 재사용) */}
+            <Del label={`선택 ${picked.length}개 삭제`} onDelete={deletePicked} />
+            <button type="button" className="btn" onClick={endPick}>취소</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn" onClick={() => setPicking(true)}>선택</button>
+            {/* 장소 추가 버튼 */}
+            <button type="button" className="btn primary" onClick={() => openSheet({ type: 'add', tab: 'place' })}><Icon d={I.plus} size={16} />추가</button>
+          </>
+        )}
       </div>
 
       {/* 일정 목록 (key 가 바뀌면 통째로 새로 마운트) */}
@@ -445,15 +579,21 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                           <a className="dist" href={dirUrl(stopOf(items[leg.from]), stopOf(it))} target="_blank" rel="noreferrer" title="Google Maps에서 길찾기">{fmtDist(leg.meters)}</a>
                         </li>
                       )}
-                      {/* 항목 행: 드래그 앤 드롭으로 순서 변경 가능 */}
-                      <li id={'it-' + it.id} className={'row' + (sel === it.id ? ' sel' : '')} draggable
+                      {/* 항목 행: 드래그 앤 드롭으로 순서 변경 가능 (선택 모드에서는 끔) */}
+                      <li id={'it-' + it.id} className={'row' + (sel === it.id && !picking ? ' sel' : '') + (picked.includes(it.id) ? ' picked' : '')} draggable={!picking}
                         onDragStart={ev => { drag.current = { day: d, idx: i }; ev.dataTransfer.effectAllowed = 'move' }}
                         onDragOver={ev => { if (drag.current?.day === d) ev.preventDefault() }}
                         onDrop={ev => { ev.preventDefault(); if (drag.current?.day === d) move(d, drag.current.idx, i); drag.current = null }}>
-                        {/* 왼쪽 레일: 장소면 번호, 메모면 점 */}
-                        <span className="rail">{num ? <span className="num">{num}</span> : <span className="dot" />}</span>
-                        {/* 항목 카드 버튼 (클릭 시 선택) */}
-                        <button type="button" className={'card' + (it.kind === 'memo' ? ' memo' : '')} onClick={() => setSel(it.id)} aria-pressed={sel === it.id}>
+                        {/* 왼쪽 레일: 선택 모드면 체크박스, 아니면 장소 번호/점 */}
+                        <span className="rail">
+                          {picking
+                            ? <input type="checkbox" checked={picked.includes(it.id)} onChange={() => togglePick(it.id)} aria-label="항목 선택" />
+                            : num ? <span className="num">{num}</span> : <span className="dot" />}
+                        </span>
+                        {/* 항목 카드 버튼: 선택 모드면 고르기, 아니면 항목 선택 */}
+                        <button type="button" className={'card' + (it.kind === 'memo' ? ' memo' : '')}
+                          onClick={() => (picking ? togglePick(it.id) : setSel(it.id))}
+                          aria-pressed={picking ? picked.includes(it.id) : sel === it.id}>
                           {/* 장소면 상세 표시, 메모면 텍스트만 표시 */}
                           {it.kind === 'place' ? (
                             <>
@@ -473,15 +613,17 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                             </>
                           ) : <span className="note">{it.text}</span>}
                         </button>
-                        {/* 행 오른쪽 동작 버튼들 */}
-                        <span className="acts">
-                          {/* 위로 이동 (첫 항목은 비활성) */}
-                          <button type="button" aria-label="위로 이동" disabled={i === 0} onClick={() => move(d, i, i - 1)}><Icon d={I.up} size={16} /></button>
-                          {/* 아래로 이동 (마지막 항목은 비활성) */}
-                          <button type="button" aria-label="아래로 이동" disabled={i === items.length - 1} onClick={() => move(d, i, i + 1)}><Icon d={I.down} size={16} /></button>
-                          {/* 수정 시트 열기 */}
-                          <button type="button" aria-label="수정" onClick={() => { setSel(it.id); openSheet({ type: 'item', day: d, id: it.id }) }}><Icon d={I.edit} size={15} /></button>
-                        </span>
+                        {/* 행 오른쪽 동작 버튼들 (선택 모드에서는 숨김) */}
+                        {!picking && (
+                          <span className="acts">
+                            {/* 위로 이동 (첫 항목은 비활성) */}
+                            <button type="button" aria-label="위로 이동" disabled={i === 0} onClick={() => move(d, i, i - 1)}><Icon d={I.up} size={16} /></button>
+                            {/* 아래로 이동 (마지막 항목은 비활성) */}
+                            <button type="button" aria-label="아래로 이동" disabled={i === items.length - 1} onClick={() => move(d, i, i + 1)}><Icon d={I.down} size={16} /></button>
+                            {/* 수정 시트 열기 */}
+                            <button type="button" aria-label="수정" onClick={() => { setSel(it.id); openSheet({ type: 'item', day: d, id: it.id }) }}><Icon d={I.edit} size={15} /></button>
+                          </span>
+                        )}
                       </li>
                     </Fragment>
                   )
@@ -539,7 +681,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
       {sheet && (
         <Sheet trip={trip} vault={state.vault} collections={state.collections} up={up} mode={sheet} setMode={setSheet} close={closeSheet} peek={peek} onPeek={() => setPeek(p => !p)}
           day={Math.min(addDay, n - 1)} setDay={setAddDay} get={get}
-          explore={explore} selectedResultId={selResult} onSelectResult={id => selectResult(id, false)}
+          explore={explore} selectedResultId={selResult} onSelectResult={selectResult}
           onRetrySearch={() => { if (lastQuery.current) void run(lastQuery.current) }}
           nearbyStays={async () => { const list = view.current ? await searchNearby('lodging', view.current) : []; remember(list); return list }}
           search={async text => { const list = view.current ? await searchText(text, view.current) : []; remember(list); return list }}

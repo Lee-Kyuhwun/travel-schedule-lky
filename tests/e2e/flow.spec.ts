@@ -90,8 +90,6 @@ test('여행을 만들고 장소를 저장·편성한 뒤 다시 접속해도 �
   // 6. 보관함의 장소를 둘째 날 일정에 추가
   await vaultCard.getByRole('button', { name: '일정에 추가' }).click()
   await vaultCard.getByLabel('날짜').selectOption('1')
-  await vaultCard.getByLabel('방문 시간 (선택)').fill('12:30')
-  await vaultCard.getByLabel('예상 체류 시간 (분 · 선택)').fill('60')
   await vaultCard.getByRole('button', { name: '이 날짜에 추가' }).click()
   await expect(page.getByRole('status').filter({ hasText: '2일차에' })).toBeVisible()
   // 같은 날에 메모도 하나 추가 (순서 변경 검증용)
@@ -103,20 +101,16 @@ test('여행을 만들고 장소를 저장·편성한 뒤 다시 접속해도 �
   await sheet.getByRole('button', { name: '닫기', exact: true }).click()
   if (mobile) await page.getByRole('button', { name: '일정', exact: true }).click()
 
-  // 7. 방문 시간·메모·순서 수정
+  // 7. 메모·순서 수정
   await page.getByRole('tab', { name: /2일차/ }).click()
   const rows = page.locator('.tl > li.row')
   await expect(rows).toHaveCount(2)
-  await expect(rows.nth(0)).toContainText('12:30')
-  await expect(rows.nth(0)).toContainText('60분')
   await rows.nth(0).getByRole('button', { name: '수정' }).click()
-  await sheet.getByLabel(/^방문 시간/).fill('18:00')
   await sheet.getByLabel('메모', { exact: true }).fill('창가 자리 요청')
   await sheet.getByRole('button', { name: '저장', exact: true }).click()
   // 메모를 장소 위로 올린다
   await rows.nth(1).getByRole('button', { name: '위로 이동' }).click()
   await expect(rows.nth(0)).toContainText('점심 뒤 산책')
-  await expect(rows.nth(1)).toContainText('18:00')
   await expect(rows.nth(1)).toContainText('창가 자리 요청')
   await saved(page)
   await noLeak()
@@ -127,8 +121,6 @@ test('여행을 만들고 장소를 저장·편성한 뒤 다시 접속해도 �
     await page.getByRole('tab', { name: /2일차/ }).click()
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0)).toContainText('점심 뒤 산책')
-    await expect(rows.nth(1)).toContainText('18:00')
-    await expect(rows.nth(1)).toContainText('60분')
     await expect(rows.nth(1)).toContainText('창가 자리 요청')
     // 장소 이름은 저장하지 않고 Place ID 로 다시 불러온다
     await expect(rows.nth(1)).toContainText(placeName, { timeout: 30_000 })

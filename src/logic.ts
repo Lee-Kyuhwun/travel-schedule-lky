@@ -50,6 +50,8 @@ export type PlaceInfo = {
   cat?: Cat; rating?: number; ratingCount?: number
   // source는 문자열 리터럴 타입 (항상 "google"만 가능)
   source: 'google'; country?: string; area?: string
+  // gist: 구글 Gemini 후기 요약 (지도 카드와 목록 카드에서 함께 보여준다)
+  gist?: { text: string; note?: string }
   /** 이 장소의 검증된 타베로그 페이지를 알 때만 설정. */
   // tabelogUrl: 검증된 타베로그 URL이 있을 때만 채움
   tabelogUrl?: string

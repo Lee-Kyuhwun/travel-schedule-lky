@@ -15,6 +15,10 @@ import { GoogleMap } from './GoogleMap'
 import { Del, Sheet, placeName, type Explore, type SheetMode } from './Sheet'
 // 카테고리 아이콘/아이콘 상수와 아이콘 컴포넌트
 import { CAT_ICON, I, Icon } from './Cover'
+// 꾹 누르면 선택 모드로 들어가는 목록 행 컴포넌트
+import { Hold } from './Hold'
+// 영어로 내려오는 가게 설명을 한국어로 바꿔주는 훅
+import { useKoText } from './translate'
 
 // Editor 컴포넌트의 props 타입 (생성자 인자 DTO)
 type Props = {
@@ -159,6 +163,9 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
   const rich = useDetail(detail?.p.id, detail?.p.country)
   // rich 는 'loading'/'error' 문자열일 수 있으므로 내용이 있는 객체만 꺼내 쓴다
   const rd = rich && typeof rich === 'object' ? rich : null
+  // 가게 설명(편집 요약·Gemini 후기 요약)은 영어로 내려오므로 한국어로 번역해 보여준다
+  const summaryKo = useKoText(rd?.summary)
+  const gistKo = useKoText(rd?.reviewSummary?.text)
 
   // 항공/숙소 예약을 한 줄씩 표시할 목록으로 변환
   const bookings: Booking[] = [
@@ -406,15 +413,15 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
             )}
             {/* 업종 (카테고리보다 세부: 예 '게 요리 전문점') */}
             {rd?.type && rd.type !== (catOf(detail.p.cat)?.label ?? '') && <p className="map-type">{rd.type}</p>}
-            {/* 구글 편집 요약: 한 줄로 어떤 곳인지 설명 */}
-            {rd?.summary && <p className="map-summary">{rd.summary}</p>}
+            {/* 구글 편집 요약: 한 줄로 어떤 곳인지 설명 (한국어만) */}
+            {summaryKo && <p className="map-summary">{summaryKo}</p>}
             {/* 오늘 영업시간 */}
             {rd?.hours && <p className="map-hours">{rd.hours}</p>}
             {/* Gemini 후기 요약: 사람들이 뭐라고 하는지 한눈에 */}
-            {rd?.reviewSummary && (
+            {gistKo && (
               <div className="map-gist">
-                <p>{rd.reviewSummary.text}</p>
-                <small>{rd.reviewSummary.note ?? '후기 요약'}</small>
+                <p>{gistKo}</p>
+                <small>{rd?.reviewSummary?.note ?? '후기 요약'}</small>
               </div>
             )}
             {/* 사진이 오면 사진 줄 (프로젝트 권한에 따라 비어 있을 수 있다) */}
@@ -494,7 +501,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
         {/* 선택 모드면 일괄 삭제 버튼을, 아니면 선택·추가 버튼을 보여준다 */}
         {picking ? (
           <>
-            {/* 두 번 눌러 확인하는 삭제 버튼 (기존 Del 컴포넌트 재사용) */}
+            {/* 고른 항목을 바로 지우는 버튼 (기존 Del 컴포넌트 재사용) */}
             <Del label={`선택 ${picked.length}개 삭제`} onDelete={deletePicked} />
             <button type="button" className="btn" onClick={endPick}>취소</button>
           </>
@@ -592,10 +599,11 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                         </li>
                       )}
                       {/* 항목 행: 드래그 앤 드롭으로 순서 변경 가능 (선택 모드에서는 끔) */}
-                      <li id={'it-' + it.id} className={'row' + (sel === it.id && !picking ? ' sel' : '') + (picked.includes(it.id) ? ' picked' : '')} draggable={!picking}
+                      <Hold id={'it-' + it.id} className={'row' + (sel === it.id && !picking ? ' sel' : '') + (picked.includes(it.id) ? ' picked' : '')} draggable={!picking}
                         onDragStart={ev => { drag.current = { day: d, idx: i }; ev.dataTransfer.effectAllowed = 'move' }}
                         onDragOver={ev => { if (drag.current?.day === d) ev.preventDefault() }}
-                        onDrop={ev => { ev.preventDefault(); if (drag.current?.day === d) move(d, drag.current.idx, i); drag.current = null }}>
+                        onDrop={ev => { ev.preventDefault(); if (drag.current?.day === d) move(d, drag.current.idx, i); drag.current = null }}
+                        onHold={() => { setPicking(true); setPicked(p => (p.includes(it.id) ? p : [...p, it.id])) }}>
                         {/* 왼쪽 레일: 선택 모드면 체크박스, 아니면 장소 번호/점 */}
                         <span className="rail">
                           {picking
@@ -633,7 +641,7 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                             <button type="button" aria-label="수정" onClick={() => { setSel(it.id); openSheet({ type: 'item', day: d, id: it.id }) }}><Icon d={I.edit} size={15} /></button>
                           </span>
                         )}
-                      </li>
+                      </Hold>
                     </Fragment>
                   )
                 })}

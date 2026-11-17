@@ -176,7 +176,6 @@ test('여행을 만들고 장소를 저장·편성한 뒤 다시 접속해도 �
   await page.getByRole('tab', { name: /2일차/ }).click()
   await rows.nth(1).getByRole('button', { name: '수정' }).click()
   await sheet.getByRole('button', { name: '삭제', exact: true }).click()
-  await sheet.getByRole('button', { name: '정말 삭제' }).click()
   await expect(rows).toHaveCount(1)
   await page.getByRole('button', { name: '추가', exact: true }).click()
   await page.getByRole('tab', { name: /^보관함/ }).click()
@@ -193,7 +192,6 @@ test('여행을 만들고 장소를 저장·편성한 뒤 다시 접속해도 �
   // 여행 삭제까지
   await page.getByRole('button', { name: mobile ? '여행 홈' : '내 여행으로' }).click()
   await page.getByRole('button', { name: '삭제', exact: true }).click()
-  await page.getByRole('button', { name: '정말 삭제' }).click()
   await expect(page.getByRole('heading', { name: '첫 여행을 만들어보세요' })).toBeVisible()
   await saved(page)
   await page.reload()

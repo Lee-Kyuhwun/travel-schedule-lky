@@ -229,7 +229,7 @@ export function placeName(e: Entry | undefined, alias?: string) {
 
 // ---------- 장소: 탐색 결과 / 보관함 ----------
 // PlaceCard: 장소 한 건을 카드로 그리는 컴포넌트
-function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void; inVault?: boolean }) {
+function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void; inVault?: boolean; picking?: boolean; picked?: boolean; onPick?: () => void }) {
   // 캐시에서 장소 항목 조회
   const e = c.get(id)
   // 항목에서 실제 장소 정보 추출 (없으면 undefined)
@@ -240,12 +240,8 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
   const [adding, setAdding] = useState(false)
   // 폼의 일차 상태 (초기값은 현재 일차)
   const [day, setDay] = useState(c.day)
-  // 방문 시간 상태
-  const [time, setTime] = useState('')
   // 메모 상태
   const [memo, setMemo] = useState('')
-  // 예상 체류 시간(분). 빈 문자열이면 미지정
-  const [stay, setStay] = useState('')
   // 표시할 이름 계산
   const name = placeName(e, ref?.alias)
   // 타베로그 링크 (p가 있을 때만 계산, && 단축 평가)
@@ -257,14 +253,14 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
     // 폼 기본 동작(페이지 새로고침) 막기
     ev.preventDefault()
     // 일정 항목 객체 생성 후 추가. 스프레드(...)로 값이 있을 때만 필드를 조건부로 포함
-    c.addItem({ id: uid(), kind: 'place', placeId: id, ...(time ? { time } : {}), ...(+stay > 0 ? { stay: Math.min(1440, Math.round(+stay)) } : {}), ...(memo.trim() ? { memo: memo.trim() } : {}) }, day, name)
+    c.addItem({ id: uid(), kind: 'place', placeId: id, ...(memo.trim() ? { memo: memo.trim() } : {}) }, day, name)
     // 추가 후 폼 닫고 입력값 초기화
-    setAdding(false); setTime(''); setMemo(''); setStay('')
+    setAdding(false); setMemo('')
   }
   return (
     // 카드 루트 <li>: 선택되면 'sel' 클래스
-    <li id={'rc-' + id} className={'pcard' + (selected ? ' sel' : '')}>
-      <button type="button" className="pcard-main" onClick={onSelect} aria-pressed={selected}>
+    <li id={'rc-' + id} className={'pcard' + (selected ? ' sel' : '') + (picked ? ' picked' : '')}>
+      <button type="button" className="pcard-main" onClick={picking ? onPick : onSelect} aria-pressed={picking ? !!picked : selected}>
         {/* 카테고리 아이콘 (없으면 'other') */}
         <span className="tile"><Icon d={CAT_ICON[p?.cat ?? 'other']} /></span>
         {/* 장소 이름 */}
@@ -273,11 +269,14 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
         {p && <small>{catOf(p.cat)?.label ?? '장소'} · {p.address}</small>}
         {/* 평점 라벨 (평점이 없으면 'none' 클래스) */}
         {p && <small className={'rating' + (p.rating == null ? ' none' : '')}>{ratingLabel(p)}</small>}
+        {/* Gemini 후기 요약: 목록에서도 무엇을 하는 집인지 보여준다 */}
+        {p?.gist && <small className="pcard-gist">{p.gist.text}</small>}
       </button>
       {/* 로딩 실패 시 에러 문구와 재시도 버튼 */}
       {e === 'error' && <p className="error">장소 정보를 불러오지 못했어요. <button type="button" className="link" onClick={() => retry(id)}>다시 시도</button></p>}
-      {/* 카드 하단 액션 영역 */}
+      {/* 카드 하단 액션 영역 (선택 모드에서는 체크박스만) */}
       <div className="pcard-acts">
+        {picking ? <input type="checkbox" checked={!!picked} onChange={onPick} aria-label={`${name} 선택`} /> : <>
         {/* 외부 링크 묶음 */}
         <span className="pcard-links">
           {/* Google 지도 링크 (새 탭으로 열기) */}
@@ -298,6 +297,7 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
         </button>
         {/* 일정 추가 폼 열고 닫기 토글 (setAdding에 함수를 넘기면 이전 값 기반 갱신) */}
         <button type="button" className="btn strong" aria-expanded={adding} onClick={() => { setDay(c.day); setAdding(a => !a) }}>일정에 추가</button>
+        </>}
       </div>
       {/* adding이 true일 때만 폼 표시 */}
       {/* 보관함 목록에서만: 장소별 내 메모와 컬렉션 지정 */}
@@ -330,14 +330,9 @@ function PlaceCard({ c, id, selected, onSelect, inVault }: { c: Ctx; id: string;
         // 추가 폼: 제출 시 add 호출
         <form className="form add-form" onSubmit={add}>
           {/* 2열 그리드 */}
-          <div className="grid2">
-            {/* 날짜 선택 (범위 초과 방지) */}
-            <Field label="날짜"><DaySelect trip={c.trip} value={Math.min(day, c.trip.days.length - 1)} onChange={setDay} /></Field>
-            {/* 시간 입력 (입력 시 상태 갱신) */}
-            <Field label="방문 시간 (선택)"><input type="time" value={time} onChange={ev => setTime(ev.target.value)} /></Field>
-          </div>
+          {/* 날짜 선택 (범위 초과 방지) */}
+          <Field label="날짜"><DaySelect trip={c.trip} value={Math.min(day, c.trip.days.length - 1)} onChange={setDay} /></Field>
           {/* 메모 입력 필드 */}
-          <Field label="예상 체류 시간 (분 · 선택)"><input type="number" min={1} max={1440} inputMode="numeric" value={stay} onChange={ev => setStay(ev.target.value)} placeholder="60" /></Field>
           <Field label="메모 (선택)"><input value={memo} onChange={ev => setMemo(ev.target.value)} placeholder="예약 번호, 주문할 메뉴 등" /></Field>
           {/* 폼 버튼 영역 */}
           <div className="form-actions">
@@ -415,6 +410,20 @@ function VaultView({ c }: { c: Ctx }) {
   const active = c.collections.find(x => x.id === col)
   // 카테고리는 저장하지 않고 방금 불러온 장소 정보로 걸러낸다 (Google 데이터 비저장 원칙)
   const list = c.vault.filter(v => (!cat || infoOf(c.get(v.placeId))?.cat === cat) && (!active || active.placeIds.includes(v.placeId)))
+  // 선택 삭제 모드와 고른 장소 id
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  // 한 장소를 고르거나 해제
+  const togglePick = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  // 고른 장소를 보관함에서 한 번에 지운다 (컬렉션에서도 함께 제거)
+  const removePicked = () => {
+    if (!picked.length) return
+    c.up((_, s) => {
+      s.vault = s.vault.filter(v => !picked.includes(v.placeId))
+      s.collections.forEach(k => { k.placeIds = k.placeIds.filter(x => !picked.includes(x)) })
+    })
+    setPicking(false); setPicked([])
+  }
   const create = (e: FormEvent) => {
     e.preventDefault()
     const n = name.trim()
@@ -449,9 +458,20 @@ function VaultView({ c }: { c: Ctx }) {
           <button className="btn">컬렉션 만들기</button>
           {active && <Del label="컬렉션 삭제" onDelete={() => { c.up((_, s) => { s.collections = s.collections.filter(x => x.id !== active.id) }); setCol('') }} />}
         </form>
+        {/* 여러 장소를 골라 한 번에 삭제 */}
+        <div className="form-actions">
+          {picking ? (
+            <>
+              <Del label={`선택 ${picked.length}개 삭제`} onDelete={removePicked} />
+              <button type="button" className="btn" onClick={() => { setPicking(false); setPicked([]) }}>취소</button>
+            </>
+          ) : (
+            <button type="button" className="btn" onClick={() => setPicking(true)}>여러 개 선택</button>
+          )}
+        </div>
       </div>
       {list.length
-        ? <ul className="list">{list.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} inVault />)}</ul>
+        ? <ul className="list">{list.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} inVault picking={picking} picked={picked.includes(v.placeId)} onPick={() => togglePick(v.placeId)} />)}</ul>
         : <p className="empty">조건에 맞는 저장 장소가 없어요.</p>}
     </>
   )
@@ -724,10 +744,6 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
   const item = c.trip.days[day]?.find(x => x.id === id)
   // 별칭 상태: 장소 항목일 때만 값 사용 (삼항 + ??로 null 대체)
   const [alias, setAlias] = useState(item?.kind === 'place' ? item.alias ?? '' : '')
-  // 방문 시간 상태
-  const [time, setTime] = useState(item?.kind === 'place' ? item.time ?? '' : '')
-  // 예상 체류 시간(분)
-  const [stay, setStay] = useState(item?.kind === 'place' && item.stay ? String(item.stay) : '')
   // 메모 상태: 장소면 memo, 메모 항목이면 text
   const [memo, setMemo] = useState(item ? (item.kind === 'place' ? item.memo ?? '' : item.text) : '')
   // 이동할 일차 상태 (기본은 현재 일차)
@@ -757,9 +773,8 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
       if (it.kind === 'place') {
         // 값이 있으면 설정, 없으면 필드 삭제 (delete = map.remove)
         if (alias.trim()) it.alias = alias.trim(); else delete it.alias
-        // 시간도 동일하게 처리
-        if (time) it.time = time; else delete it.time
-        if (+stay > 0) it.stay = Math.min(1440, Math.round(+stay)); else delete it.stay
+        // 방문 시간·체류 시간은 더 이상 쓰지 않는다 (예전에 저장된 값도 정리)
+        delete it.time; delete it.stay
         // 메모도 동일하게 처리
         if (memo.trim()) it.memo = memo.trim(); else delete it.memo
       // 메모 항목이면 text만 갱신
@@ -800,17 +815,6 @@ function ItemEdit({ c, day, id, close }: { c: Ctx; day: number; id: string; clos
           </div>
           {/* 별칭 입력 */}
           <Field label="별칭 (선택 · 내가 부르는 이름)"><input value={alias} onChange={ev => setAlias(ev.target.value)} placeholder="예: 첫날 저녁 라멘집" /></Field>
-          {/* 방문 시간 입력 영역 */}
-          <Field label="방문 시간 (지정하면 거리순 정렬에서 고정)">
-            {/* 입력과 버튼 한 줄 배치 */}
-            <div className="inline">
-              {/* 시간 입력 */}
-              <input type="time" value={time} onChange={ev => setTime(ev.target.value)} />
-              {/* 시간이 있을 때만 '지우기' 버튼 표시 */}
-              {time && <button type="button" className="btn" onClick={() => setTime('')}>시간 지우기</button>}
-            </div>
-          </Field>
-          <Field label="예상 체류 시간 (분 · 선택)"><input type="number" min={1} max={1440} inputMode="numeric" value={stay} onChange={ev => setStay(ev.target.value)} placeholder="60" /></Field>
           {/* 일정에 있는 장소를 보관함(즐겨찾기)에 저장 */}
           <button type="button" className={'btn' + (c.vault.some(v => v.placeId === item.placeId) ? ' on' : '')} disabled={c.vault.some(v => v.placeId === item.placeId)}
             onClick={() => { c.up((_, s) => saveToVault(s.vault, { placeId: item.placeId })); c.say('보관함에 저장했어요') }}>

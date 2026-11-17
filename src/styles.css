@@ -390,6 +390,14 @@ input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0
 /* 선택 삭제 모드: 고른 항목을 강조 */
 .row.picked .card { border-color: var(--accent); background: var(--accent-ghost); }
 .row .rail input[type='checkbox'] { width: 18px; min-height: 18px; accent-color: var(--accent); }
+/* 목록 카드의 Gemini 후기 요약 (두 줄까지만) */
+.pcard-gist { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: var(--fs-xs); }
+/* 보관함 여러 개 선택 삭제 */
+.pcard.picked { border-color: var(--accent); background: var(--accent-ghost); }
+.pcard-acts input[type='checkbox'] { width: 20px; min-height: 20px; margin-right: auto; accent-color: var(--accent); }
+.vault-tools .form-actions { justify-content: flex-end; margin-top: 0; }
+/* 지도 카드에서 바로 일정에 넣을 때 쓰는 일차 선택 */
+.map-card .pcard-acts select { height: 32px; max-width: 46%; font-size: var(--fs-xs); }
 .day-head { align-items: center; }
 .map-chips button { display: inline-flex; align-items: center; gap: 4px; }
 .booking, .suggest { border-radius: var(--r-md); }

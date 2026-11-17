@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 // 도메인 로직 유틸 함수/상수와 타입들 (Java의 static 유틸 + DTO import)
 import {
-  CATS, DAY_COLORS, addDays, catOf, dayCount, dirUrl, fmtDay, fmtDist, fmtPeriod, legs, placeUrl, ratingLabel, routeLength, saveToVault, sortResults, suggestOrder, tabelogLink,
+  CATS, DAY_COLORS, addDays, catOf, dayCount, dirUrl, fmtDay, fmtDist, fmtPeriod, legs, placeUrl, ratingLabel, routeLength, saveToVault, sortResults, suggestOrder, tabelogLink, uid,
   type AppState, type Cat, type Item, type LatLng, type Stop, type Trip, type View,
 } from './logic'
 // 장소 정보 조회/캐시/검색 관련 함수들 (서비스 계층과 유사)
@@ -285,8 +285,15 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
   }
   // 검색 결과 선택: 지도에 상세 카드를 띄우고 목록 카드를 강조한다.
   const selectResult = (id: string) => setSelResult(id)
-  // 상세 카드에서 '일정에 추가': 목록 카드의 추가 폼을 열어 준다 (날짜·시간은 거기서 고른다)
-  const addFromMap = (id: string) => { openSheet({ type: 'add', tab: 'place' }); scrollToEl('rc-' + id, 'nearest') }
+  // 상세 카드에서 '일정에 추가': 시트를 거치지 않고 카드에서 고른 일차 맨 끝에 바로 넣는다
+  const addFromMap = (id: string) => {
+    // 카드에서 고른 일차 (일차 수를 넘지 않게 보정)
+    const d = Math.min(addDay, n - 1)
+    // 해당 일차 끝에 장소 항목 추가
+    up(t => { t.days[d].push({ id: uid(), kind: 'place', placeId: id }) })
+    // 카드를 닫고 추가한 일차를 열어 바로 확인할 수 있게 한다
+    setSelResult(null); setSel(null); setTabRaw(d); setScreen('plan')
+  }
 
   // 일정 항목을 길찾기용 Stop 으로 변환
   const stopOf = (it: Item): Stop => {
@@ -457,9 +464,14 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                   // 아니면 보관함에 새로 저장 (같은 장소는 한 번만)
                   saveToVault(s.vault, { placeId: detail.p.id })
                 })}>{saved ? '저장됨' : '보관함에 저장'}</button>
-              {/* 일정 항목이 아닌 탐색 결과만: 목록 카드의 추가 폼 열기 */}
+              {/* 일정 항목이 아닌 탐색 결과만: 일차를 고르고 바로 추가 */}
               {!detail.inPlan && (
-                <button type="button" className="btn strong" onClick={() => addFromMap(detail.p.id)}>일정에 추가</button>
+                <>
+                  <select className="map-add-day" aria-label="추가할 일차" value={Math.min(addDay, n - 1)} onChange={e => setAddDay(+e.target.value)}>
+                    {trip.days.map((_, i) => <option key={i} value={i}>{i + 1}일차 · {fmtDay(dates[i])}</option>)}
+                  </select>
+                  <button type="button" className="btn strong" onClick={() => addFromMap(detail.p.id)}>일정에 추가</button>
+                </>
               )}
             </div>
           </section>
@@ -601,9 +613,6 @@ export function Editor({ trip, state, update, onBack, onEditTrip }: Props) {
                               <span className="tile"><Icon d={CAT_ICON[p?.cat ?? 'other']} /></span>
                               {/* 장소 이름 */}
                               <b>{placeName(e, it.alias)}</b>
-                              {/* 시간이 있으면 표시 */}
-                              {it.time && <em className="time">{it.time}</em>}
-                              {it.stay && <em className="time">{it.stay}분</em>}
                               {/* 카테고리/원래 이름, 실패 또는 로딩 상태 문구 */}
                               <small>
                                 {p ? `${catOf(p.cat)?.label ?? '장소'}${it.alias ? ` · ${p.name}` : ''}` : e === 'error' ? '장소 정보를 불러오지 못함 · 수정에서 다시 시도' : '불러오는 중…'}

@@ -43,7 +43,8 @@ export function loadGoogle(): Promise<void> {
 }
 
 // FIELDS: 구글 Places API에 요청할 필드 목록 (List<String> 상수)
-const FIELDS = ['id', 'displayName', 'formattedAddress', 'location', 'rating', 'userRatingCount', 'primaryType', 'types', 'addressComponents']
+// reviewSummary: Gemini 후기 요약. 목록 카드에서도 ‘무슨 집인지’ 보여주려고 목록 조회에 포함한다
+const FIELDS = ['id', 'displayName', 'formattedAddress', 'location', 'rating', 'userRatingCount', 'primaryType', 'types', 'addressComponents', 'reviewSummary']
 // toInfo: 구글 Place → PlaceInfo 변환 (좌표 없으면 null, Mapper/변환기 역할)
 function toInfo(p: google.maps.places.Place): PlaceInfo | null {
   // 좌표가 없으면 변환 불가 → null
@@ -64,6 +65,10 @@ function toInfo(p: google.maps.places.Place): PlaceInfo | null {
     source: 'google', country: comp('country')?.shortText ?? undefined,
     // 지역명: 시/군 없으면 광역 단위 사용
     area: (comp('locality') ?? comp('administrative_area_level_1'))?.longText ?? undefined,
+    // Gemini 후기 요약 (없으면 필드 자체를 넣지 않음)
+    ...(p.reviewSummary?.text
+      ? { gist: { text: p.reviewSummary.text, ...(p.reviewSummary.disclosureText ? { note: p.reviewSummary.disclosureText } : {}) } }
+      : {}),
   }
 }
 // lib: 구글 places 라이브러리를 로딩 후 가져오는 async 함수 (await = future.get(), 블로킹 없이 대기)

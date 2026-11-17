@@ -11,6 +11,10 @@ import { infoOf, nativeOf, retry, type Entry } from './places'
 import { renderTripImage } from './exportImage'
 // import: 아이콘 상수와 Icon 컴포넌트(=재사용 뷰 조각)
 import { CAT_ICON, I, Icon } from './Cover'
+// import: 꾹 누르면 선택 모드로 들어가는 목록 행 컴포넌트
+import { Hold } from './Hold'
+// import: 영어로 내려오는 가게 설명을 한국어로 바꿔주는 훅
+import { useKoText } from './translate'
 
 // type: 문자열 리터럴 유니온 (Java enum과 유사) - 추가 화면의 탭 종류
 export type AddTab = 'place' | 'memo' | 'flight' | 'stay'
@@ -205,20 +209,11 @@ function DaySelect({ trip, value, onChange }: { trip: Trip; value: number; onCha
     </select>
   )
 }
-/** 2단계 삭제: 첫 클릭은 대기 상태, 두 번째 클릭에 삭제. */
-// Del 컴포넌트: 두 번 눌러야 삭제 (export = public). label은 기본값 '삭제'
+/** 삭제 버튼: 한 번 누르면 바로 지운다 (예전의 ‘정말 삭제’ 확인 단계는 없앴다). */
+// Del 컴포넌트 (export = public). label 은 기본값 '삭제'
 export function Del({ onDelete, label = '삭제' }: { onDelete: () => void; label?: string }) {
-  // armed 상태: 첫 클릭 시 true (확인 대기 상태)
-  const [armed, setArmed] = useState(false)
-  // 렌더링 시작
-  return (
-    // 포커스를 잃으면 확인 대기 해제
-    <button type="button" className="btn danger" onBlur={() => setArmed(false)}
-      onClick={e => { e.stopPropagation(); if (armed) onDelete(); else setArmed(true) }}>
-      {/* 상태에 따라 버튼 문구 변경 */}
-      {armed ? '정말 삭제' : label}
-    </button>
-  )
+  // 카드 안에서 눌러도 그 카드의 클릭 동작이 실행되지 않게 전파를 막는다
+  return <button type="button" className="btn danger" onClick={e => { e.stopPropagation(); onDelete() }}>{label}</button>
 }
 /** 저장된 장소의 표시 이름: 사용자 별칭 우선, 다음 실시간 데이터, 마지막은 상태 문구. */
 // placeName 함수: 별칭 > 실시간 정보 이름 > 상태 문구 순으로 표시할 이름 결정
@@ -229,7 +224,7 @@ export function placeName(e: Entry | undefined, alias?: string) {
 
 // ---------- 장소: 탐색 결과 / 보관함 ----------
 // PlaceCard: 장소 한 건을 카드로 그리는 컴포넌트
-function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void; inVault?: boolean; picking?: boolean; picked?: boolean; onPick?: () => void }) {
+function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick, onHold }: { c: Ctx; id: string; selected: boolean; onSelect?: () => void; inVault?: boolean; picking?: boolean; picked?: boolean; onPick?: () => void; onHold?: () => void }) {
   // 캐시에서 장소 항목 조회
   const e = c.get(id)
   // 항목에서 실제 장소 정보 추출 (없으면 undefined)
@@ -244,6 +239,8 @@ function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick
   const [memo, setMemo] = useState('')
   // 표시할 이름 계산
   const name = placeName(e, ref?.alias)
+  // Gemini 요약은 영어로만 내려오므로 한국어로 바꿔서 보여준다 (실패하면 표시 안 함)
+  const gist = useKoText(p?.gist?.text)
   // 타베로그 링크 (p가 있을 때만 계산, && 단축 평가)
   // 일본어 매장명을 이미 확인했으면 그걸로 검색한다 (없으면 가진 값으로)
   const tabelog = p && tabelogLink(p, nativeOf(id))
@@ -259,7 +256,7 @@ function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick
   }
   return (
     // 카드 루트 <li>: 선택되면 'sel' 클래스
-    <li id={'rc-' + id} className={'pcard' + (selected ? ' sel' : '') + (picked ? ' picked' : '')}>
+    <Hold id={'rc-' + id} className={'pcard' + (selected ? ' sel' : '') + (picked ? ' picked' : '')} onHold={onHold}>
       <button type="button" className="pcard-main" onClick={picking ? onPick : onSelect} aria-pressed={picking ? !!picked : selected}>
         {/* 카테고리 아이콘 (없으면 'other') */}
         <span className="tile"><Icon d={CAT_ICON[p?.cat ?? 'other']} /></span>
@@ -269,8 +266,8 @@ function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick
         {p && <small>{catOf(p.cat)?.label ?? '장소'} · {p.address}</small>}
         {/* 평점 라벨 (평점이 없으면 'none' 클래스) */}
         {p && <small className={'rating' + (p.rating == null ? ' none' : '')}>{ratingLabel(p)}</small>}
-        {/* Gemini 후기 요약: 목록에서도 무엇을 하는 집인지 보여준다 */}
-        {p?.gist && <small className="pcard-gist">{p.gist.text}</small>}
+        {/* Gemini 후기 요약: 목록에서도 무엇을 하는 집인지 보여준다 (한국어만) */}
+        {gist && <small className="pcard-gist">{gist}</small>}
       </button>
       {/* 로딩 실패 시 에러 문구와 재시도 버튼 */}
       {e === 'error' && <p className="error">장소 정보를 불러오지 못했어요. <button type="button" className="link" onClick={() => retry(id)}>다시 시도</button></p>}
@@ -343,7 +340,7 @@ function PlaceCard({ c, id, selected, onSelect, inVault, picking, picked, onPick
           </div>
         </form>
       )}
-    </li>
+    </Hold>
   )
 }
 
@@ -415,6 +412,8 @@ function VaultView({ c }: { c: Ctx }) {
   const [picked, setPicked] = useState<string[]>([])
   // 한 장소를 고르거나 해제
   const togglePick = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  // 꾹 누르면 선택 모드로 들어가면서 그 장소를 고른다
+  const startPick = (id: string) => { setPicking(true); setPicked(p => (p.includes(id) ? p : [...p, id])) }
   // 고른 장소를 보관함에서 한 번에 지운다 (컬렉션에서도 함께 제거)
   const removePicked = () => {
     if (!picked.length) return
@@ -471,7 +470,7 @@ function VaultView({ c }: { c: Ctx }) {
         </div>
       </div>
       {list.length
-        ? <ul className="list">{list.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} inVault picking={picking} picked={picked.includes(v.placeId)} onPick={() => togglePick(v.placeId)} />)}</ul>
+        ? <ul className="list">{list.map(v => <PlaceCard key={v.placeId} c={c} id={v.placeId} selected={false} inVault picking={picking} picked={picked.includes(v.placeId)} onPick={() => togglePick(v.placeId)} onHold={() => startPick(v.placeId)} />)}</ul>
         : <p className="empty">조건에 맞는 저장 장소가 없어요.</p>}
     </>
   )
